@@ -16,6 +16,8 @@
 #include "stm32g4_utils.h"
 #include <stdio.h>
 #include "corexy.h"
+#include "stm32g4_adc.h"
+#include "stm32g4_timer.h"
 
 #define BLINK_DELAY 100 // ms
 
@@ -44,19 +46,21 @@ void heartbeat(void) {
 /**
   * @brief  Point d'entrée de votre application
   */
-int main(void) {
+ int main(void) {
     HAL_Init(); // Initialisation des couches basses des drivers
-
+    BSP_ADC_init();
     BSP_GPIO_enable();
     BSP_UART_init(UART2_ID, 115200);
-
     BSP_SYS_set_std_usart(UART2_ID, UART2_ID, UART2_ID);
 
-    BSP_GPIO_pin_config(LED_GREEN_GPIO, LED_GREEN_PIN, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
-
+    /*BSP_GPIO_pin_config(LED_GREEN_GPIO, LED_GREEN_PIN, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
+*/
     printf("Hi Jean, can you read me?\n");
 
-    Motor_Init_process_main(); // Initialisation des moteurs
+/*    Motor_Init_process_main(); // Initialisation des moteurs
+*/
+    BSP_TIMER_run_us(TIMER3_ID, 100, 1);
+    BSP_TIMER_enable_PWM(TIMER3_ID, TIM_CHANNEL_2, 5, 0, 0);
 
     while (1) {
         if (char_received(UART2_ID)) {
@@ -64,9 +68,13 @@ int main(void) {
             HAL_Delay(BLINK_DELAY);
             write_LED(false);
         }
+    	static uint16_t duty, adc_value;
+/*motorcontrol_process_main();*/
+        adc_value = BSP_ADC_getValue(ADC_2);
+        duty = adc_value / 4;
+        printf("ADC %u\n", adc_value);
+        BSP_TIMER_set_duty(TIMER3_ID,TIM_CHANNEL_2, duty);
 
-        // Exemple de contrôle des moteurs
-        motorcontrol_process_main();
     }
 }
 

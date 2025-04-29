@@ -15,7 +15,7 @@
 #include "stm32g4_sys.h"
 #include "stm32g4_gpio.h"
 
-#if USE_BSP_TIMER | 1
+#if USE_BSP_TIMER
 
 /* Private defines -----------------------------------------------------------*/
 /**

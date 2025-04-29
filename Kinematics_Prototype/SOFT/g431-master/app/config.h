@@ -28,7 +28,7 @@
 
 #define USE_RTC				0
 
-#define USE_ADC				0
+#define USE_ADC				1
 	/* Configuration pour activer les entrées analogiques souhaitées */
 	#define USE_IN1		0 //Broche correspondante: PA0
 	#define USE_IN2		1 //Broche correspondante: PA1
