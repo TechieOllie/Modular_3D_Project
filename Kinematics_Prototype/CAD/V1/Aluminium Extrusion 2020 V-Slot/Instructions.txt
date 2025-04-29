@@ -1,0 +1,4 @@
+To change the length simply open th file in solidWorks 2018 or higher and edit "Boss-extrude1". 
+change the extrusion value to desired value. 
+
+ENJOY!
