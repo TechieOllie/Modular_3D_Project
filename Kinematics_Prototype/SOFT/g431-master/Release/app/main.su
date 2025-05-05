@@ -1,0 +1,4 @@
+../app/main.c:27:6:write_LED	0	static
+../app/main.c:36:6:process_command	72	static
+../app/main.c:70:6:process_char	0	static
+../app/main.c:96:5:main	16	static

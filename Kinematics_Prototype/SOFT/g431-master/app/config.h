@@ -17,7 +17,7 @@
 #include "stm32g4xx_hal.h"
 
 /* Defines -------------------------------------------------------------------*/
-#define LED_GREEN_PIN 		GPIO_PIN_3
+#define LED_GREEN_PIN 		GPIO_PIN_4
 #define LED_GREEN_GPIO 		GPIOA
 
 #define UART2_ON_PA3_PA2

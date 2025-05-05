@@ -1,0 +1,5 @@
+../drivers/bsp/SD/FatFs/src/drivers/sd_diskio.c:73:9:SD_initialize	8	static
+../drivers/bsp/SD/FatFs/src/drivers/sd_diskio.c:91:9:SD_status	8	static
+../drivers/bsp/SD/FatFs/src/drivers/sd_diskio.c:111:9:SD_read	8	static
+../drivers/bsp/SD/FatFs/src/drivers/sd_diskio.c:135:9:SD_write	8	static
+../drivers/bsp/SD/FatFs/src/drivers/sd_diskio.c:158:9:SD_ioctl	72	static

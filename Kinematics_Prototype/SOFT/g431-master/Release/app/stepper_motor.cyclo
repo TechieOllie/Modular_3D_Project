@@ -1,0 +1,8 @@
+../app/stepper_motor.c:16:6:STEPPER_init	1
+../app/stepper_motor.c:25:14:STEPPER_add	4
+../app/stepper_motor.c:130:6:STEPPER_stop	2
+../app/stepper_motor.c:70:6:STEPPER_move_steps	4
+../app/stepper_motor.c:100:6:STEPPER_move_to_mm	3
+../app/stepper_motor.c:118:6:STEPPER_move_mm	3
+../app/stepper_motor.c:138:7:STEPPER_get_position_mm	2
+../app/stepper_motor.c:146:6:STEPPER_home	2

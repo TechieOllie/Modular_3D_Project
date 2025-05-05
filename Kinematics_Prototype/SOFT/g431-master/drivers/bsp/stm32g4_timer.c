@@ -482,4 +482,73 @@ void TIM6_DAC_IRQHandler(void)
 
 }
 
+/**
+ * @brief Set timer frequency in Hz
+ * @param timer_id: Timer identifier
+ * @param frequency_hz: Desired frequency in Hz
+ * @retval None
+ */
+ void BSP_TIMER_set_frequency_Hz(timer_id_t timer_id, float frequency_hz) {
+    if (frequency_hz <= 0) {
+        frequency_hz = 1.0f; // Avoid division by zero, minimum 1 Hz
+    }
+    
+    TIM_TypeDef* TIMx = NULL;
+    
+    // Get timer instance based on timer_id
+    switch (timer_id) {
+        case TIMER1_ID:
+            TIMx = TIM1;
+            break;
+        case TIMER2_ID:
+            TIMx = TIM2;
+            break;
+        case TIMER3_ID:
+            TIMx = TIM3;
+            break;
+        case TIMER4_ID:
+            TIMx = TIM4;
+            break;
+        // Add other timers as needed
+        default:
+            return; // Invalid timer ID
+    }
+    
+    // Calculate timer period based on desired frequency
+    // Timer clock might be different from system clock, adjust if necessary
+    uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // Usually timers run on APB1 clock
+    if (TIMx == TIM1) {
+        timer_clock = HAL_RCC_GetPCLK2Freq(); // TIM1 usually on APB2
+    }
+    
+    // For most timers, if APBx prescaler is not 1, frequency is multiplied by 2
+    if (timer_clock != SystemCoreClock) {
+        timer_clock *= 2;
+    }
+    
+    // Calculate period for desired frequency
+    // Period = timer_clock / frequency_hz - 1
+    uint32_t period = (uint32_t)((timer_clock / frequency_hz) - 1);
+    
+    // Set timer prescaler to 0 and period to the calculated value
+    TIMx->PSC = 0;
+    TIMx->ARR = period;
+    
+    // Generate update event to apply new settings
+    TIMx->EGR = TIM_EGR_UG;
+}
+
+/**
+ * @brief Disable PWM output on a timer channel
+ * @param timer_id: Timer identifier
+ * @param TIM_CHANNEL_x: Timer channel
+ * @retval None
+ */
+ void BSP_TIMER_disable_PWM(timer_id_t timer_id, uint16_t TIM_CHANNEL_x) {
+    TIM_HandleTypeDef* htim = BSP_TIMER_get_handler(timer_id);
+    if (htim != NULL) {
+        HAL_TIM_PWM_Stop(htim, TIM_CHANNEL_x);
+    }
+}
+
 #endif /* USE_BSP_TIMER */

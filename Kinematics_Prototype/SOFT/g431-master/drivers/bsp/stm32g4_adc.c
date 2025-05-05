@@ -139,7 +139,7 @@ void ADC_PORT_Init(){
 	#endif
 
 	#if USE_IN3
-  		BSP_GPIO_pin_config(GPIOA, GPIO_PIN_6, GPIO_MODE_ANALOG, GPIO_NOPULL, GPIO_SPEED_FREQ_MEDIUM, GPIO_NO_AF);
+  		BSP_GPIO_pin_config(GPIOB, GPIO_PIN_4 GPIO_MODE_ANALOG, GPIO_NOPULL, GPIO_SPEED_FREQ_MEDIUM, GPIO_NO_AF);
   		adc_id[ADC_3] = index;
   		sConfig.Rank = ranks[index];
   		index++;

@@ -60,5 +60,21 @@ void BSP_TIMER_set_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint16_t du
 
 void BSP_TIMER_set_period_with_same_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint32_t period);
 
+/**
+ * @brief Set timer frequency in Hz
+ * @param timer_id: Timer identifier 
+ * @param frequency_hz: Desired frequency in Hz
+ * @retval None
+ */
+ void BSP_TIMER_set_frequency_Hz(timer_id_t timer_id, float frequency_hz);
+
+ /**
+ * @brief Disable PWM output on a timer channel
+ * @param timer_id: Timer identifier
+ * @param TIM_CHANNEL_x: Timer channel
+ * @retval None
+ */
+void BSP_TIMER_disable_PWM(timer_id_t timer_id, uint16_t TIM_CHANNEL_x);
+
 #endif /* USE_BSP_TIMER */
 #endif /* BSP_STM32G4_TIMER_H_ */

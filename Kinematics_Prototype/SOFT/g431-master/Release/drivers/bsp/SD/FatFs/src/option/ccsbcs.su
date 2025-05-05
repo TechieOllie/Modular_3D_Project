@@ -1,0 +1,2 @@
+../drivers/bsp/SD/FatFs/src/option/ccsbcs.c:501:7:ff_convert	0	static
+../drivers/bsp/SD/FatFs/src/option/ccsbcs.c:528:7:ff_wtoupper	0	static
