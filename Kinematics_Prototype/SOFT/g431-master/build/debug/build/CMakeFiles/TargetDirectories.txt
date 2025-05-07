@@ -1,3 +1,0 @@
-/home/ol/Github-Repos/Modular_3D_Printer/Kinematics_Prototype/SOFT/g431-master/build/debug/build/CMakeFiles/corexy.dir
-/home/ol/Github-Repos/Modular_3D_Printer/Kinematics_Prototype/SOFT/g431-master/build/debug/build/CMakeFiles/edit_cache.dir
-/home/ol/Github-Repos/Modular_3D_Printer/Kinematics_Prototype/SOFT/g431-master/build/debug/build/CMakeFiles/rebuild_cache.dir
