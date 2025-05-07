@@ -164,8 +164,6 @@ int main(void) {
     
     // Main loop
     while (1) {
-        
-
          // Check for received characters
          if (BSP_UART_data_ready(UART2_ID)) {
              char c = BSP_UART_get_next_byte(UART2_ID);

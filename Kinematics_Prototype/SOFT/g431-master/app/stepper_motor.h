@@ -35,6 +35,9 @@ typedef struct {
     // Motor characteristics
     float steps_per_mm;  // Calibration value (steps needed for 1mm movement)
     float max_speed;     // Maximum speed in mm/s
+
+    uint8_t microstepping;  // 1, 2, 4, 8, 16 values for TB6600
+    float current_limit_a;  // Current limit in Amps
     
     // Current position in steps
     int32_t current_position;
@@ -48,9 +51,9 @@ void STEPPER_init(void);
 
 // Add a stepper motor to the system
 stepper_id_t STEPPER_add(GPIO_TypeDef* step_port, uint16_t step_pin,
-                         GPIO_TypeDef* dir_port, uint16_t dir_pin,
-                         timer_id_t timer_id, uint32_t timer_channel,
-                         float steps_per_mm);
+    GPIO_TypeDef* dir_port, uint16_t dir_pin,
+    timer_id_t timer_id, uint32_t timer_channel,
+    float steps_per_mm, uint8_t microstepping, float current_limit_a);
 
 // Move a stepper motor a specific number of steps
 void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed);
@@ -70,7 +73,6 @@ float STEPPER_get_position_mm(stepper_id_t id);
 // Home a stepper motor (if limit switches are installed)
 void STEPPER_home(stepper_id_t id);
 
-// Add this prototype
-void STEPPER_test_nema17(stepper_id_t id);
+
 
 #endif /* STEPPER_MOTOR_H */

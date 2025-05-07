@@ -1,0 +1,22 @@
+# ninja log v5
+2	65	1746628228059242701	CMakeFiles/corexy.dir/core/Src/sysmem.c.obj	69783e3a1755f35
+2	69	1746628228059242701	CMakeFiles/corexy.dir/app/parser.c.obj	19cc7bc0b6e7fa9c
+2	89	1746628228088984156	CMakeFiles/corexy.dir/core/Src/syscalls.c.obj	f98084ebe17ef793
+2	143	1746628228138553260	CMakeFiles/corexy.dir/core/Src/stm32g4xx_it.c.obj	9e2269ee649a144d
+1	153	1746628228148467081	CMakeFiles/corexy.dir/app/corexy.c.obj	b4aa26847348bcbf
+2	154	1746628228148467081	CMakeFiles/corexy.dir/core/Src/system_stm32g4xx.c.obj	265e6c70a20e0580
+1	182	1746628228178208543	CMakeFiles/corexy.dir/app/main.c.obj	53b88f63ee50a9ca
+65	240	1746628228227777642	CMakeFiles/corexy.dir/core/Startup/bootloader.c.obj	2888be49747c31ac
+1	43	1746628263958970186	CMakeFiles/corexy.dir/core/Startup/startup_stm32g431kbtx.s.obj	1fd4c38d05c4216d
+1	231	1746628264077940343	CMakeFiles/corexy.dir/drivers/bsp/BMP180/stm32g4_bmp180.c.obj	512b13302170e6a0
+1	231	1746628264058112935	CMakeFiles/corexy.dir/drivers/bsp/APDS9960/stm32g4_apds9960_color_algo.c.obj	d952b440d82c7313
+2	231	1746628264077940343	CMakeFiles/corexy.dir/drivers/bsp/APDS9960/stm32g4_apds9960.c.obj	f032122f462655df
+2	231	1746628264087854049	CMakeFiles/corexy.dir/drivers/bsp/BH1750FVI/stm32g4_bh1750fvi.c.obj	5545683420b1a5e4
+43	231	1746628264117595163	CMakeFiles/corexy.dir/drivers/bsp/DS18B20/stm32g4_ds18b20.c.obj	e0950219fb0ec89a
+1	148	1746628290022087283	CMakeFiles/corexy.dir/drivers/bsp/DHT11/stm32g4_dht11.c.obj	bab342733a06085f
+1	152	1746628290032008619	CMakeFiles/corexy.dir/drivers/bsp/GPS/stm32g4_gps.c.obj	5f1857812391b1f3
+1	162	1746628290041929954	CMakeFiles/corexy.dir/app/stepper_motor.c.obj	12be20afa266e7
+2	167	1746628290041929954	CMakeFiles/corexy.dir/drivers/bsp/epaper/Fonts/stm32g4_epaper_font16.c.obj	6bf92bd83ab9d870
+2	183	1746628290061772625	CMakeFiles/corexy.dir/drivers/bsp/epaper/Fonts/stm32g4_epaper_font20.c.obj	d18bfffb94229069
+1	198	1746628290071693965	CMakeFiles/corexy.dir/drivers/bsp/epaper/Fonts/stm32g4_epaper_font12.c.obj	b5efe4ec326b6df6
+1	208	1746628290081615307	CMakeFiles/corexy.dir/app/main.c.obj	53b88f63ee50a9ca
