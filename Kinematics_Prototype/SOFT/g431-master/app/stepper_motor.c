@@ -7,10 +7,18 @@
  *******************************************************************************
  */
 
+#include "config.h"
 #include "stepper_motor.h"
 #include "stm32g4_utils.h"
+#include "stm32g4_gpio.h"
+#include "stm32g4_timer.h"
+#include "stm32g4_uart.h"
+/* System includes - correct order is important */
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
-#include "stdlib.h"
 #include <math.h>
 
 /**
@@ -35,11 +43,14 @@
  *    - For NEMA17, 24VDC is typically recommended --> we will use 12VDC
  */
 
+#define ACCEL_PROFILE_ENTRIES 100  // Number of steps in acceleration profile
+
 static bool current_direction[STEPPER_COUNT] = {false};
 static void set_direction(stepper_id_t id, bool forward);
 uint32_t BSP_GPIO_get_AF_from_timer(timer_id_t timer_id);
 
 // Track and update frequency only when it changes significantly
+static stepper_motor_t steppers[STEPPER_COUNT];
 static float current_frequencies[STEPPER_COUNT] = {0.0f};
 
 void update_frequency(stepper_id_t id, float new_freq) {
@@ -50,12 +61,14 @@ void update_frequency(stepper_id_t id, float new_freq) {
     }
 }
 
-static stepper_motor_t steppers[STEPPER_COUNT];
-
 // Use PROGMEM or const to keep strings in flash instead of RAM
 static const char MSG_MOTOR_INIT[] = "Stepper motor module initialized\n";
 
-// Add a validation function to reduce redundant checks
+/**
+ * Validate that a motor ID is valid and the motor is enabled
+ * @param id Motor ID to check
+ * @return true if valid, false otherwise
+ */
 static bool is_valid_motor(stepper_id_t id) {
     if (id >= STEPPER_COUNT || !steppers[id].enabled) {
         printf("Error: Motor %d not enabled or invalid ID\n", id);
@@ -258,10 +271,20 @@ void STEPPER_stop(stepper_id_t id) {
     BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel);
 }
 
+/**
+ * Get position of stepper motor in millimeters
+ */
 float STEPPER_get_position_mm(stepper_id_t id) {
     if (!is_valid_motor(id)) return 0.0f;
-    
     return (float)steppers[id].current_position / steppers[id].steps_per_mm;
+}
+
+/**
+ * Get steps per mm value for a motor
+ */
+float STEPPER_get_steps_per_mm(stepper_id_t id) {
+    if (!is_valid_motor(id)) return 0.0f;
+    return steppers[id].steps_per_mm;
 }
 
 void STEPPER_home(stepper_id_t id) {

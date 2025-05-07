@@ -12,11 +12,12 @@
 
 #include <stdbool.h>
 
-typedef struct {
-    int g_code;         // e.g. 0 (rapid) or 1 (linear move)
-    float x, y, z;      // target coordinates
-    float feedrate;     // F code
-    bool has_x, has_y, has_z, has_f;  // flags for optional fields
+typedef struct
+{
+    int g_code;                      // e.g. 0 (rapid) or 1 (linear move)
+    float x, y, z;                   // target coordinates
+    float feedrate;                  // F code
+    bool has_x, has_y, has_z, has_f; // flags for optional fields
 } GCodeCommand;
 
 // Parse a single G-code line
@@ -27,5 +28,13 @@ bool parse_gcode_file(const char *filename, void (*callback)(GCodeCommand *cmd))
 
 // Process a string containing G-code commands
 void process_gcode_string(const char *gcode, void (*callback)(GCodeCommand *cmd));
+
+/**
+ * Parse a G-code command string and fill a GCodeCommand structure
+ * @param cmd_str The G-code command string to parse
+ * @param cmd Pointer to a GCodeCommand structure to fill
+ * @return true if parsing was successful, false otherwise
+ */
+bool parse_gcode(const char *cmd_str, GCodeCommand *cmd);
 
 #endif /* PARSER_H */
