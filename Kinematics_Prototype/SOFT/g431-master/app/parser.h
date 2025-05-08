@@ -12,12 +12,25 @@
 
 #include <stdbool.h>
 
+#define MAX_GCODE_PARAMS 10
+
+// Structure to represent a G-code parameter (e.g., X100, Y200)
+typedef struct
+{
+    char letter; // Parameter letter (X, Y, Z, etc.)
+    float value; // Parameter value
+} GCodeParam;
+
 typedef struct
 {
     int g_code;                      // e.g. 0 (rapid) or 1 (linear move)
     float x, y, z;                   // target coordinates
     float feedrate;                  // F code
     bool has_x, has_y, has_z, has_f; // flags for optional fields
+
+    // Parameters collection for more complex G-codes like G28
+    GCodeParam params[MAX_GCODE_PARAMS];
+    int numParams;
 } GCodeCommand;
 
 // Parse a single G-code line

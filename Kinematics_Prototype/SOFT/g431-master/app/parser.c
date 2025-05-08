@@ -19,6 +19,7 @@ void parse_gcode_line(const char *line, GCodeCommand *cmd)
 {
     memset(cmd, 0, sizeof(GCodeCommand)); // Zero everything
     cmd->g_code = -1;                     // Invalid G-code by default
+    cmd->numParams = 0;                   // Start with no parameters
 
     const char *ptr = line;
     while (*ptr)
@@ -56,10 +57,26 @@ void parse_gcode_line(const char *line, GCodeCommand *cmd)
 
         if (i == 0)
         {
-            continue; // No number after letter, skip
+            // No number after letter, add it as a parameter anyway
+            // This handles bare parameters like "X" in "G28 X"
+            if (cmd->numParams < MAX_GCODE_PARAMS)
+            {
+                cmd->params[cmd->numParams].letter = letter;
+                cmd->params[cmd->numParams].value = 0;
+                cmd->numParams++;
+            }
+            continue;
         }
 
         float value = atof(buffer);
+
+        // Store as a parameter for all letters
+        if (cmd->numParams < MAX_GCODE_PARAMS)
+        {
+            cmd->params[cmd->numParams].letter = letter;
+            cmd->params[cmd->numParams].value = value;
+            cmd->numParams++;
+        }
 
         // Process the letter-number pair
         switch (letter)
@@ -83,7 +100,7 @@ void parse_gcode_line(const char *line, GCodeCommand *cmd)
             cmd->feedrate = value;
             cmd->has_f = true;
             break;
-            // Add other G-code parameters as needed
+            // Other parameters are already stored in the params array
         }
     }
 }

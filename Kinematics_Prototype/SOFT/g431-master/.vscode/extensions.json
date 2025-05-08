@@ -2,6 +2,7 @@
   "recommendations": [
     "ms-vscode.cmake-tools",
     "ms-vscode.cpptools",
-    "ms-vscode.vscode-embedded-tools"
+    "ms-vscode.vscode-embedded-tools",
+    "STMicroelectronics.stm32-vscode-extension"
   ]
 }

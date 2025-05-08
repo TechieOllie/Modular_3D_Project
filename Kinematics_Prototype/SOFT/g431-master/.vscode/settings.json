@@ -4,5 +4,10 @@
   "files.associations": {
     "stm32g4_sys.h": "c",
     "parser.h": "c"
+  },
+  "remote.extensionKind": {
+    "stmicroelectronics.stm32-vscode-extension": [
+      "workspace"
+    ]
   }
 }

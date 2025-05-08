@@ -71,6 +71,26 @@ int main(void)
     // Initialize the CoreXY system
     CoreXY_Init();
 
+    // Set machine dimensions (define your build volume)
+    CoreXY_SetMachineDimensions(220.0f, 220.0f, 250.0f); // 220x220x250mm build volume
+
+#if ENDSTOP_ENABLED
+    // Configure endstops
+    CoreXY_ConfigureEndstops(
+        // X min endstop (connected to GPIOA, pin 1, active LOW)
+        GPIOA, GPIO_PIN_1, ENDSTOP_TRIGGER_LOW,
+        // X max endstop (not used - set to NULL)
+        NULL, 0, 0,
+        // Y min endstop (connected to GPIOA, pin 2, active LOW)
+        GPIOA, GPIO_PIN_2, ENDSTOP_TRIGGER_LOW,
+        // Y max endstop (not used)
+        NULL, 0, 0,
+        // Z min endstop (connected to GPIOA, pin 3, active LOW)
+        GPIOA, GPIO_PIN_3, ENDSTOP_TRIGGER_LOW,
+        // Z max endstop (not used)
+        NULL, 0, 0);
+#endif
+
     printf("\nCNC Control System Ready\n");
     printf("Enter G-code commands or special commands (HOME, STOP, POS)\n");
 
