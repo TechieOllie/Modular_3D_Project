@@ -14,7 +14,7 @@
 #include "stm32g4_timer.h"
 
 // If using endstops, set to 1
-#define ENDSTOP_ENABLED 1
+#define ENDSTOP_ENABLED 0
 
 // Endstop configuration when enabled
 #if ENDSTOP_ENABLED
