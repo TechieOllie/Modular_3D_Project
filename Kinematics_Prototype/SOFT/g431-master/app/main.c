@@ -48,8 +48,26 @@ void process_command(void)
 
     printf("Processing command: %s\n", cmd_buffer);
 
-    // Process the G-code command using the callback
-    process_gcode_string(cmd_buffer, gcode_callback);
+    // Check for special commands first
+    if (strcmp(cmd_buffer, "HOME") == 0)
+    {
+        CoreXY_Home();
+    }
+    else if (strcmp(cmd_buffer, "STOP") == 0)
+    {
+        CoreXY_EmergencyStop();
+    }
+    else if (strncmp(cmd_buffer, "POS", 3) == 0)
+    {
+        float x, y, z;
+        CoreXY_GetPosition(&x, &y, &z);
+        printf("Position: X:%.3f Y:%.3f Z:%.3f\n", x, y, z);
+    }
+    else
+    {
+        // Process as G-code command using the callback if not a special command
+        process_gcode_string(cmd_buffer, gcode_callback);
+    }
 
     // Reset buffer for next command
     cmd_index = 0;
