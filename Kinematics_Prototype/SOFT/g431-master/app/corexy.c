@@ -59,19 +59,19 @@ void CoreXY_Init(void)
     // NEMA 17 typically has 200 steps per revolution (1.8° per step)
     // For a GT2 pulley with 20 teeth (2mm pitch), one revolution = 40mm
     // So steps_per_mm = 200/40 = 5 steps/mm
-    float steps_per_mm = 5.0f;
+    float steps_per_mm = 80.0f;
     uint8_t microstepping = 16;   // Using 1/16 microstepping for smoother motion
-    float current_limit_a = 1.2f; // Set to 1.2A (typical for NEMA17)
+    float current_limit_a = 1.5f; // Set to 1.2A (typical for NEMA17)
 
     // Add the motors to the system
     motor_a = STEPPER_add(GPIOB, GPIO_PIN_4, GPIOA, GPIO_PIN_6,
                           TIMER3_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
 
-    motor_b = STEPPER_add(GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10,
-                          TIMER2_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    //motor_b = STEPPER_add(GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10,
+      //                    TIMER2_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
 
-    motor_z = STEPPER_add(GPIOA, GPIO_PIN_11, GPIOA, GPIO_PIN_12,
-                          TIMER4_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    //motor_z = STEPPER_add(GPIOA, GPIO_PIN_11, GPIOA, GPIO_PIN_12,
+       //                   TIMER4_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
 
     // Store the motor IDs for later use
     x_stepper_id = motor_a;
