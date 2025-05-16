@@ -59,7 +59,7 @@ void CoreXY_Init(void)
     // NEMA 17 typically has 200 steps per revolution (1.8° per step)
     // For a GT2 pulley with 20 teeth (2mm pitch), one revolution = 40mm
     // So steps_per_mm = 200/40 = 5 steps/mm
-    float steps_per_mm = 5.0f;
+    float steps_per_mm = 80.0f;
     uint8_t microstepping = 16;   // Using 1/16 microstepping for smoother motion
     float current_limit_a = 1.2f; // Set to 1.2A (typical for NEMA17)
 

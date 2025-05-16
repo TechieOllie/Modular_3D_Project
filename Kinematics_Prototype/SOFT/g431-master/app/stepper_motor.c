@@ -4,6 +4,7 @@
  * @author  Your Name
  * @date    Current Date
  * @brief   Stepper motor control implementation
+ *          Operating at 20kHz PWM frequency for smoother and quieter operation
  *******************************************************************************
  */
 
@@ -116,8 +117,8 @@ stepper_id_t STEPPER_add(GPIO_TypeDef *step_port, uint16_t step_pin,
             // Configure direction pin as output
             BSP_GPIO_pin_config(dir_port, dir_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
 
-            // Initialize timer for PWM
-            BSP_TIMER_run_us(timer_id, 1000, true); // Initialize with 1kHz
+            // Initialize timer for PWM (changed from 1000Hz to 20kHz)
+            BSP_TIMER_run_us(timer_id, 50, true); // 50us period = 20kHz
 
             // Store configuration
             steppers[id].step_port = step_port;
@@ -210,8 +211,8 @@ void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
 
     // Set appropriate speed limits based on microstepping setting
     // TB6600 allows higher speeds with higher microstepping
-    float max_speed = 800.0f * steppers[id].microstepping; // Adjust max speed based on microstepping
-    float min_speed = 100.0f;                              // Lower limit for smooth starting
+    float max_speed = 16000.0f * steppers[id].microstepping; // Adjusted for 20kHz base (was 800)
+    float min_speed = 2000.0f;                               // Adjusted for 20kHz base (was 100)
 
     // With higher microstepping, we can have a proportionally higher max speed
     printf("Using microstepping 1/%d, max speed adjusted to %.1f Hz\n",
@@ -247,7 +248,7 @@ void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
     update_frequency(id, current_speed);
 
     // Calculate steps for acceleration and deceleration
-    float total_accel_time_ms = 300.0f; // Configurable accel time
+    float total_accel_time_ms = 300.0f; // Keep same accel time
     float progress;
     for (int i = 0; i < total_accel_time_ms; i += 10)
     {
@@ -257,7 +258,7 @@ void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
         update_frequency(id, current_speed);
     }
 
-    // Calculate remaining steps at full speed
+    // Calculate remaining steps at full speed - adjusted for 20x higher frequency
     int32_t interval_steps = (int32_t)((current_speed * 0.01f) + 0.5f); // exact steps in 10ms
     int32_t const_speed_steps = steps - (2 * (int32_t)(total_accel_time_ms * speed / 1000.0f));
     if (const_speed_steps > 0)
@@ -485,8 +486,8 @@ bool STEPPER_home_with_endstop(stepper_id_t id, float homing_speed_mm_s, float m
 
     // Set initial speed (slower for homing)
     float slow_homing_speed = homing_speed_steps * 0.5f;
-    if (slow_homing_speed < 100.0f)
-        slow_homing_speed = 100.0f;
+    if (slow_homing_speed < 2000.0f) // Changed from 100.0f to 2000.0f for 20kHz
+        slow_homing_speed = 2000.0f;
     update_frequency(id, slow_homing_speed);
 
     // Move until endstop is hit or max travel reached
