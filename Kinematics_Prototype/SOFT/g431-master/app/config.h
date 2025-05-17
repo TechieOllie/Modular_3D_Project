@@ -28,10 +28,10 @@
 
 #define USE_RTC 0
 
-#define USE_ADC 1
+#define USE_ADC 0
 /* Configuration pour activer les entrées analogiques souhaitées */
 #define USE_IN1 0  // Broche correspondante: PA0
-#define USE_IN2 1  // Broche correspondante: PA1
+#define USE_IN2 0  // Broche correspondante: PA1
 #define USE_IN3 0  // Broche correspondante: PA6
 #define USE_IN4 0  // Broche correspondante: PA7
 #define USE_IN10 0 // Broche correspondante: PF1 /!\ Broche indisponible sur g431 sauf si SB11 et pas SB10 (petits pads à souder sur la carte)
@@ -49,7 +49,7 @@
 #define USE_FONT16x26 0
 #endif
 
-#define USE_EPAPER 0 // e-paper (�cran basse consommation)
+#define USE_EPAPER 1 // e-paper (�cran basse consommation)
 #define USE_WS2812 0 // Matrice de led
 
 /*------------------Capteurs------------------*/

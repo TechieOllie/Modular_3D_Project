@@ -3,7 +3,8 @@
   "cmake.configureOnOpen": true,
   "files.associations": {
     "stm32g4_sys.h": "c",
-    "parser.h": "c"
+    "parser.h": "c",
+    "string.h": "c"
   },
   "remote.extensionKind": {
     "stmicroelectronics.stm32-vscode-extension": [

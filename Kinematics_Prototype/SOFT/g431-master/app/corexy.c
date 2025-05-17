@@ -24,8 +24,8 @@ static float default_feedrate = 500.0f;                // Default feedrate in mm
 static bool absolute_positioning_mode = true;          // Default to absolute positioning (G90)
 
 // Stepper motor IDs
-static stepper_id_t motor_a; // First CoreXY motor
-static stepper_id_t motor_b; // Second CoreXY motor
+static stepper_id_t motor_x; // First CoreXY motor
+static stepper_id_t motor_y; // Second CoreXY motor
 static stepper_id_t motor_z; // Z-axis motor
 
 // Machine dimensions
@@ -64,18 +64,18 @@ void CoreXY_Init(void)
     float current_limit_a = 1.5f; // Set to 1.2A (typical for NEMA17)
 
     // Add the motors to the system
-    motor_a = STEPPER_add(GPIOB, GPIO_PIN_4, GPIOA, GPIO_PIN_6,
+    motor_x = STEPPER_add(GPIOB, GPIO_PIN_4, GPIOA, GPIO_PIN_6,
                           TIMER3_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
 
-    //motor_b = STEPPER_add(GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10,
-      //                    TIMER2_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    // motor_y = STEPPER_add(GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10,
+    //                     TIMER2_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
 
-    //motor_z = STEPPER_add(GPIOA, GPIO_PIN_11, GPIOA, GPIO_PIN_12,
-       //                   TIMER4_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    // motor_z = STEPPER_add(GPIOA, GPIO_PIN_11, GPIOA, GPIO_PIN_12,
+    //                    TIMER4_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
 
     // Store the motor IDs for later use
-    x_stepper_id = motor_a;
-    y_stepper_id = motor_b;
+    x_stepper_id = motor_x;
+    y_stepper_id = motor_y;
     z_stepper_id = motor_z;
 
     // Set default machine dimensions
@@ -114,8 +114,8 @@ void CoreXY_MoveTo(float x, float y, float z, float feedrate)
     float speed_mm_s = feedrate / 60.0f;
 
     // Move the motors to their targets
-    STEPPER_move_to_mm(motor_a, a_pos, speed_mm_s);
-    STEPPER_move_to_mm(motor_b, b_pos, speed_mm_s);
+    STEPPER_move_to_mm(motor_x, a_pos, speed_mm_s);
+    STEPPER_move_to_mm(motor_y, b_pos, speed_mm_s);
     STEPPER_move_to_mm(motor_z, z, speed_mm_s);
 
     // Update position tracking
@@ -239,7 +239,7 @@ void CoreXY_ProcessGCodeCommand(GCodeCommand *cmd)
 #if ENDSTOP_ENABLED
             if (z_stepper_id >= 0)
             {
-                STEPPER_home_with_endstop(z_stepper_id, 5.0f, machine_dimensions.max_z_mm);
+                STEPPER_home_with_endstop(z_stepper_id, 5.0f, -machine_dimensions.max_z_mm);
             }
 #else
             if (z_stepper_id >= 0)
@@ -257,7 +257,7 @@ void CoreXY_ProcessGCodeCommand(GCodeCommand *cmd)
 #if ENDSTOP_ENABLED
             if (x_stepper_id >= 0)
             {
-                STEPPER_home_with_endstop(x_stepper_id, 5.0f, machine_dimensions.max_x_mm);
+                STEPPER_home_with_endstop(x_stepper_id, 5.0f, -machine_dimensions.max_x_mm);
             }
 #else
             if (x_stepper_id >= 0)
@@ -275,7 +275,7 @@ void CoreXY_ProcessGCodeCommand(GCodeCommand *cmd)
 #if ENDSTOP_ENABLED
             if (y_stepper_id >= 0)
             {
-                STEPPER_home_with_endstop(y_stepper_id, 5.0f, machine_dimensions.max_y_mm);
+                STEPPER_home_with_endstop(y_stepper_id, 5.0f, -machine_dimensions.max_y_mm);
             }
 #else
             if (y_stepper_id >= 0)
@@ -414,8 +414,8 @@ void CoreXY_GetPosition(float *x, float *y, float *z)
 // Emergency stop
 void CoreXY_EmergencyStop(void)
 {
-    STEPPER_stop(motor_a);
-    STEPPER_stop(motor_b);
+    STEPPER_stop(motor_x);
+    STEPPER_stop(motor_y);
     STEPPER_stop(motor_z);
     printf("EMERGENCY STOP\n");
 }

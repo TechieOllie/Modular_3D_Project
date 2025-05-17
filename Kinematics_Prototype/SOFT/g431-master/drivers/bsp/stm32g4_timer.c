@@ -8,7 +8,6 @@
  *******************************************************************************
  */
 
-
 /* Includes ------------------------------------------------------------------*/
 #include "stm32g4_timer.h"
 #include "stm32g4xx_hal_tim.h"
@@ -27,17 +26,14 @@
 
 /* Private types -------------------------------------------------------------*/
 
-
 /* Private variables ---------------------------------------------------------*/
-static TIM_HandleTypeDef structure_handles[TIMER_ID_NB]; //Ce tableau contient les structures qui sont utilisées pour piloter chaque TIMER avec la librairie HAL.
+static TIM_HandleTypeDef structure_handles[TIMER_ID_NB]; // Ce tableau contient les structures qui sont utilisées pour piloter chaque TIMER avec la librairie HAL.
 
 /* Private constants ---------------------------------------------------------*/
-static const TIM_TypeDef * instance_array[TIMER_ID_NB] = {TIM1, TIM2, TIM3, TIM4, TIM6};
+static const TIM_TypeDef *instance_array[TIMER_ID_NB] = {TIM1, TIM2, TIM3, TIM4, TIM6};
 static const IRQn_Type nvic_irq_array[TIMER_ID_NB] = {TIM1_UP_TIM16_IRQn, TIM2_IRQn, TIM3_IRQn, TIM4_IRQn, TIM6_DAC_IRQn};
 
-
 /* Private functions declarations --------------------------------------------*/
-
 
 /* Private functions definitions ---------------------------------------------*/
 /**
@@ -45,25 +41,26 @@ static const IRQn_Type nvic_irq_array[TIMER_ID_NB] = {TIM1_UP_TIM16_IRQn, TIM2_I
  * @pre 	Le timer a ete initialisé
  * @post	L'interruption est acquitée
  */
-void clear_it_status(timer_id_t timer_id){
-	switch(timer_id)
+void clear_it_status(timer_id_t timer_id)
+{
+	switch (timer_id)
 	{
-		case TIMER1_ID:
-			__HAL_TIM_CLEAR_IT(&structure_handles[TIMER1_ID], TIM_IT_UPDATE);
-			break;
-		case TIMER2_ID:
-			__HAL_TIM_CLEAR_IT(&structure_handles[TIMER2_ID], TIM_IT_UPDATE);
-			break;
-		case TIMER3_ID:
-			__HAL_TIM_CLEAR_IT(&structure_handles[TIMER3_ID], TIM_IT_UPDATE);
-			break;
-		case TIMER4_ID:
-			__HAL_TIM_CLEAR_IT(&structure_handles[TIMER4_ID], TIM_IT_UPDATE);
-			break;
-		case TIMER6_ID:
-			__HAL_TIM_CLEAR_IT(&structure_handles[TIMER6_ID], TIM_IT_UPDATE);
-		default:
-			break;
+	case TIMER1_ID:
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER1_ID], TIM_IT_UPDATE);
+		break;
+	case TIMER2_ID:
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER2_ID], TIM_IT_UPDATE);
+		break;
+	case TIMER3_ID:
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER3_ID], TIM_IT_UPDATE);
+		break;
+	case TIMER4_ID:
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER4_ID], TIM_IT_UPDATE);
+		break;
+	case TIMER6_ID:
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER6_ID], TIM_IT_UPDATE);
+	default:
+		break;
 	}
 }
 
@@ -82,66 +79,66 @@ void clear_it_status(timer_id_t timer_id){
 void BSP_TIMER_run_us(timer_id_t timer_id, uint32_t us, bool enable_irq)
 {
 	// On active l'horloge du timer concerné.
-	switch(timer_id)
+	switch (timer_id)
 	{
-		case TIMER1_ID:
-			__HAL_RCC_TIM1_CLK_ENABLE();
-			break;
-		case TIMER2_ID:
-			__HAL_RCC_TIM2_CLK_ENABLE();
-			break;
-		case TIMER3_ID:
-			__HAL_RCC_TIM3_CLK_ENABLE();
-			break;
-		case TIMER4_ID:
-			__HAL_RCC_TIM4_CLK_ENABLE();
-			break;
-		case TIMER6_ID:
-			__HAL_RCC_TIM6_CLK_ENABLE();
-		default:
-			break;
+	case TIMER1_ID:
+		__HAL_RCC_TIM1_CLK_ENABLE();
+		break;
+	case TIMER2_ID:
+		__HAL_RCC_TIM2_CLK_ENABLE();
+		break;
+	case TIMER3_ID:
+		__HAL_RCC_TIM3_CLK_ENABLE();
+		break;
+	case TIMER4_ID:
+		__HAL_RCC_TIM4_CLK_ENABLE();
+		break;
+	case TIMER6_ID:
+		__HAL_RCC_TIM6_CLK_ENABLE();
+	default:
+		break;
 	}
 
 	// Time base configuration
-	structure_handles[timer_id].Instance = (TIM_TypeDef*)instance_array[timer_id]; //On donne le timer en instance à notre gestionnaire (Handle)
+	structure_handles[timer_id].Instance = (TIM_TypeDef *)instance_array[timer_id]; // On donne le timer en instance à notre gestionnaire (Handle)
 
-	//On détermine la fréquence des évènements comptés par le timer.
+	// On détermine la fréquence des évènements comptés par le timer.
 	uint32_t freq;
-	if(timer_id == TIMER1_ID)
+	if (timer_id == TIMER1_ID)
 	{
-		//Fréquence du TIMER1 est PCLK2 lorsque APB2 Prescaler vaut 1, sinon : PCLK2*2
+		// Fréquence du TIMER1 est PCLK2 lorsque APB2 Prescaler vaut 1, sinon : PCLK2*2
 		freq = HAL_RCC_GetPCLK2Freq();
-		if((RCC->CFGR & RCC_CFGR_PPRE2) >> 11 != RCC_HCLK_DIV1)
+		if ((RCC->CFGR & RCC_CFGR_PPRE2) >> 11 != RCC_HCLK_DIV1)
 			freq *= 2;
 	}
 	else
 	{
-		//Fréquence des TIMERS 2,3,4 est PCLK1 lorsque APB1 Prescaler vaut 1, sinon : PCLK1*2
+		// Fréquence des TIMERS 2,3,4 est PCLK1 lorsque APB1 Prescaler vaut 1, sinon : PCLK1*2
 		freq = HAL_RCC_GetPCLK1Freq();
-		if((RCC->CFGR & RCC_CFGR_PPRE1) >> 8 != RCC_HCLK_DIV1)
+		if ((RCC->CFGR & RCC_CFGR_PPRE1) >> 8 != RCC_HCLK_DIV1)
 			freq *= 2;
 	}
 
-	uint64_t nb_psec_per_event = (uint64_t)(1000000000000/freq);
-	uint64_t period = (((uint64_t)(us))*1000000)/nb_psec_per_event;
+	uint64_t nb_psec_per_event = (uint64_t)(1000000000000 / freq);
+	uint64_t period = (((uint64_t)(us)) * 1000000) / nb_psec_per_event;
 
 	uint32_t max_period = GET_MAX_PERIOD(timer_id);
 
-	if(period > max_period)
+	if (period > max_period)
 	{
 		uint32_t prescaler = 1;
-		while(period > max_period)
+		while (period > max_period)
 		{
 			prescaler *= 2;
 			period /= 2;
 		}
-		structure_handles[timer_id].Init.Prescaler 	= prescaler - 1;	//le prescaler du timer doit être enregistré avec un offset de -1.
-		structure_handles[timer_id].Init.Period 	= (uint32_t)(period - 1);	//On compte de 0 à period-1
+		structure_handles[timer_id].Init.Prescaler = prescaler - 1;		  // le prescaler du timer doit être enregistré avec un offset de -1.
+		structure_handles[timer_id].Init.Period = (uint32_t)(period - 1); // On compte de 0 à period-1
 	}
 	else
 	{
-		structure_handles[timer_id].Init.Prescaler 	= 0;
-		structure_handles[timer_id].Init.Period 	= (uint32_t)(period - 1);
+		structure_handles[timer_id].Init.Prescaler = 0;
+		structure_handles[timer_id].Init.Period = (uint32_t)(period - 1);
 	}
 
 	structure_handles[timer_id].Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
@@ -153,20 +150,20 @@ void BSP_TIMER_run_us(timer_id_t timer_id, uint32_t us, bool enable_irq)
 		Error_Handler();
 	}
 
-	if(enable_irq)
+	if (enable_irq)
 	{
-		//acquittement des IT
+		// acquittement des IT
 		clear_it_status(timer_id);
 		// On fixe les priorités des interruptions du timer PreemptionPriority = 0, SubPriority = 1 et on autorise les interruptions
-		HAL_NVIC_SetPriority(nvic_irq_array[timer_id] , 4,  1);
+		HAL_NVIC_SetPriority(nvic_irq_array[timer_id], 4, 1);
 		HAL_NVIC_EnableIRQ(nvic_irq_array[timer_id]);
 	}
 
 	// On autorise les interruptions
-	if(HAL_TIM_Base_Start_IT(&structure_handles[timer_id]) != HAL_OK)
-    {
-        Error_Handler();
-    }
+	if (HAL_TIM_Base_Start_IT(&structure_handles[timer_id]) != HAL_OK)
+	{
+		Error_Handler();
+	}
 
 	// On lance le timer
 	__HAL_TIM_ENABLE(&structure_handles[timer_id]);
@@ -182,11 +179,11 @@ void BSP_TIMER_run_us(timer_id_t timer_id, uint32_t us, bool enable_irq)
  */
 void BSP_TIMER_stop(timer_id_t timer_id)
 {
-    // On désactive le timer et ses interruptions
-	if(HAL_TIM_Base_Stop_IT(&structure_handles[timer_id]) != HAL_OK)
-    {
-        Error_Handler();
-    }
+	// On désactive le timer et ses interruptions
+	if (HAL_TIM_Base_Stop_IT(&structure_handles[timer_id]) != HAL_OK)
+	{
+		Error_Handler();
+	}
 }
 
 uint32_t BSP_TIMER_read(timer_id_t timer_id)
@@ -196,42 +193,41 @@ uint32_t BSP_TIMER_read(timer_id_t timer_id)
 
 void BSP_TIMER_write(timer_id_t timer_id, uint32_t counter)
 {
-	if(timer_id == TIMER2_ID)	// TIMER2 est un timer 32 bits, les autres sont des timers 16 bits.
-    {
-        __HAL_TIM_SET_COUNTER(&structure_handles[timer_id], counter);
-    }
-    else
-    {
-        __HAL_TIM_SET_COUNTER(&structure_handles[timer_id], (uint16_t)counter);
-    }
+	if (timer_id == TIMER2_ID) // TIMER2 est un timer 32 bits, les autres sont des timers 16 bits.
+	{
+		__HAL_TIM_SET_COUNTER(&structure_handles[timer_id], counter);
+	}
+	else
+	{
+		__HAL_TIM_SET_COUNTER(&structure_handles[timer_id], (uint16_t)counter);
+	}
 }
-
 
 uint32_t BSP_TIMER_get_period(timer_id_t timer_id)
 {
-    return structure_handles[timer_id].Init.Period + 1;
+	return structure_handles[timer_id].Init.Period + 1;
 }
 
 void BSP_TIMER_set_period(timer_id_t timer_id, uint32_t period)
 {
-	if(timer_id == TIMER2_ID)	// TIMER2 est un timer 32 bits, les autres sont des timers 16 bits.
-    {
-        __HAL_TIM_SET_AUTORELOAD(&structure_handles[timer_id], period - 1);
-    }
-    else
-    {
-        __HAL_TIM_SET_AUTORELOAD(&structure_handles[timer_id], (uint16_t)period - 1);
-    }
-	// On s'assure que la valeur courante du timer soit toujours inférieure à la période configurée (pour éviter un cycle mort dans une PWM par exemple)
-	if( BSP_TIMER_read(TIMER4_ID) >= period )
+	if (timer_id == TIMER2_ID) // TIMER2 est un timer 32 bits, les autres sont des timers 16 bits.
 	{
-		BSP_TIMER_write(TIMER4_ID , period-1);
+		__HAL_TIM_SET_AUTORELOAD(&structure_handles[timer_id], period - 1);
+	}
+	else
+	{
+		__HAL_TIM_SET_AUTORELOAD(&structure_handles[timer_id], (uint16_t)period - 1);
+	}
+	// On s'assure que la valeur courante du timer soit toujours inférieure à la période configurée (pour éviter un cycle mort dans une PWM par exemple)
+	if (BSP_TIMER_read(TIMER4_ID) >= period)
+	{
+		BSP_TIMER_write(TIMER4_ID, period - 1);
 	}
 }
 
 uint16_t BSP_TIMER_get_prescaler(timer_id_t timer_id)
 {
-    return structure_handles[timer_id].Init.Prescaler + 1;
+	return structure_handles[timer_id].Init.Prescaler + 1;
 }
 
 void BSP_TIMER_set_prescaler(timer_id_t timer_id, uint16_t prescaler)
@@ -246,14 +242,14 @@ void BSP_TIMER_enable_output_trigger(timer_id_t timer_id)
 	sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
 	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
 	HAL_TIMEx_MasterConfigSynchronization(&structure_handles[timer_id], &sMasterConfig);
-	HAL_TIM_GenerateEvent(&structure_handles[timer_id],TIM_EVENTSOURCE_UPDATE);
+	HAL_TIM_GenerateEvent(&structure_handles[timer_id], TIM_EVENTSOURCE_UPDATE);
 }
 /**
  * @brief Accesseur du handler
  */
-TIM_HandleTypeDef * BSP_TIMER_get_handler(timer_id_t timer_id)
+TIM_HandleTypeDef *BSP_TIMER_get_handler(timer_id_t timer_id)
 {
-    return &structure_handles[timer_id];
+	return &structure_handles[timer_id];
 }
 
 /**
@@ -291,75 +287,116 @@ TIM_HandleTypeDef * BSP_TIMER_get_handler(timer_id_t timer_id)
  */
 void BSP_TIMER_enable_PWM(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint16_t duty, bool remap, bool negative_channel)
 {
-    switch(timer_id)
-    {
-    case TIMER1_ID:
-    	if(negative_channel)
-    	{
-    		switch(TIM_CHANNEL_x)
-    		{
-    			case TIM_CHANNEL_1: BSP_GPIO_pin_config(GPIOA, 				(remap)?GPIO_PIN_11:GPIO_PIN_7, 	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1); break;
-    			case TIM_CHANNEL_2: BSP_GPIO_pin_config((remap)?GPIOB:GPIOA,(remap)?GPIO_PIN_0:GPIO_PIN_12, 	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1); break;
-    			case TIM_CHANNEL_3: BSP_GPIO_pin_config(GPIOF, 				GPIO_PIN_0, 						GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1); break;
-    			default: break;
-    		}
-    	}
-    	else
-    	{
-    		switch(TIM_CHANNEL_x)
-    		{
-    			case TIM_CHANNEL_1: BSP_GPIO_pin_config(GPIOA, 				GPIO_PIN_8, 					GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1); break;
-    			case TIM_CHANNEL_2: BSP_GPIO_pin_config(GPIOA, 				GPIO_PIN_9, 					GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1); break;
-    			case TIM_CHANNEL_3: BSP_GPIO_pin_config(GPIOA, 				GPIO_PIN_10, 					GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1); break;
-    			case TIM_CHANNEL_4: BSP_GPIO_pin_config(GPIOA, 				GPIO_PIN_11, 					GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF11_TIM1); break;
-    			default: break;
-    		}
-    	}
-    	break;
-    case TIMER2_ID:
-    	switch(TIM_CHANNEL_x)
-    	{
-    		case TIM_CHANNEL_1: BSP_GPIO_pin_config(GPIOA, 				(remap)?GPIO_PIN_5:GPIO_PIN_0,	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF1_TIM2); break;
-    		case TIM_CHANNEL_2: BSP_GPIO_pin_config((remap)?GPIOB:GPIOA,(remap)?GPIO_PIN_3:GPIO_PIN_1,	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF1_TIM2); break;
-    		case TIM_CHANNEL_3: BSP_GPIO_pin_config(GPIOA, 				(remap)?GPIO_PIN_9:GPIO_PIN_2, 	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap)?GPIO_AF10_TIM2:GPIO_AF1_TIM2); break;
-    		case TIM_CHANNEL_4: BSP_GPIO_pin_config(GPIOA, 				(remap)?GPIO_PIN_10:GPIO_PIN_3,	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap)?GPIO_AF10_TIM2:GPIO_AF1_TIM2); break;
-    		default: break;
-    	}
-    	break;
-    case TIMER3_ID:
-    	switch(TIM_CHANNEL_x)
-    	{
-    		case TIM_CHANNEL_1: BSP_GPIO_pin_config((remap)?GPIOB:GPIOA,(remap)?GPIO_PIN_4:GPIO_PIN_6, 	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3); break;
-    		case TIM_CHANNEL_2: BSP_GPIO_pin_config(GPIOA, 				(remap)?GPIO_PIN_7:GPIO_PIN_4, 	GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3); break;
-    		case TIM_CHANNEL_3: BSP_GPIO_pin_config(GPIOB, 				GPIO_PIN_0, 					GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3); break;
-    		case TIM_CHANNEL_4: BSP_GPIO_pin_config(GPIOB, 				GPIO_PIN_7, 					GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3); break;
-    		default: break;
-    	}
-    	break;
-    case TIMER4_ID:
-    	switch(TIM_CHANNEL_x)
-    	{
-    	    case TIM_CHANNEL_1: BSP_GPIO_pin_config((remap)?GPIOB:GPIOA,(remap)?GPIO_PIN_6:GPIO_PIN_11, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap)?GPIO_AF2_TIM4:GPIO_AF10_TIM4); break;
-    	    case TIM_CHANNEL_2: BSP_GPIO_pin_config((remap)?GPIOB:GPIOA,(remap)?GPIO_PIN_7:GPIO_PIN_12, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap)?GPIO_AF2_TIM4:GPIO_AF10_TIM4); break;
-    	    case TIM_CHANNEL_3: BSP_GPIO_pin_config((remap)?GPIOB:GPIOA,(remap)?GPIO_PIN_8:GPIO_PIN_13, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap)?GPIO_AF2_TIM4:GPIO_AF10_TIM4); break;
-    	    default: break;
-    	}
-    	break;
-    default:
+	switch (timer_id)
+	{
+	case TIMER1_ID:
+		if (negative_channel)
+		{
+			switch (TIM_CHANNEL_x)
+			{
+			case TIM_CHANNEL_1:
+				BSP_GPIO_pin_config(GPIOA, (remap) ? GPIO_PIN_11 : GPIO_PIN_7, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1);
+				break;
+			case TIM_CHANNEL_2:
+				BSP_GPIO_pin_config((remap) ? GPIOB : GPIOA, (remap) ? GPIO_PIN_0 : GPIO_PIN_12, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1);
+				break;
+			case TIM_CHANNEL_3:
+				BSP_GPIO_pin_config(GPIOF, GPIO_PIN_0, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1);
+				break;
+			default:
+				break;
+			}
+		}
+		else
+		{
+			switch (TIM_CHANNEL_x)
+			{
+			case TIM_CHANNEL_1:
+				BSP_GPIO_pin_config(GPIOA, GPIO_PIN_8, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1);
+				break;
+			case TIM_CHANNEL_2:
+				BSP_GPIO_pin_config(GPIOA, GPIO_PIN_9, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1);
+				break;
+			case TIM_CHANNEL_3:
+				BSP_GPIO_pin_config(GPIOA, GPIO_PIN_10, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF6_TIM1);
+				break;
+			case TIM_CHANNEL_4:
+				BSP_GPIO_pin_config(GPIOA, GPIO_PIN_11, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF11_TIM1);
+				break;
+			default:
+				break;
+			}
+		}
 		break;
-    }
+	case TIMER2_ID:
+		switch (TIM_CHANNEL_x)
+		{
+		case TIM_CHANNEL_1:
+			BSP_GPIO_pin_config(GPIOA, (remap) ? GPIO_PIN_5 : GPIO_PIN_0, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF1_TIM2);
+			break;
+		case TIM_CHANNEL_2:
+			BSP_GPIO_pin_config((remap) ? GPIOB : GPIOA, (remap) ? GPIO_PIN_3 : GPIO_PIN_1, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF1_TIM2);
+			break;
+		case TIM_CHANNEL_3:
+			BSP_GPIO_pin_config(GPIOA, (remap) ? GPIO_PIN_9 : GPIO_PIN_2, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap) ? GPIO_AF10_TIM2 : GPIO_AF1_TIM2);
+			break;
+		case TIM_CHANNEL_4:
+			BSP_GPIO_pin_config(GPIOA, (remap) ? GPIO_PIN_10 : GPIO_PIN_3, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap) ? GPIO_AF10_TIM2 : GPIO_AF1_TIM2);
+			break;
+		default:
+			break;
+		}
+		break;
+	case TIMER3_ID:
+		switch (TIM_CHANNEL_x)
+		{
+		case TIM_CHANNEL_1:
+			BSP_GPIO_pin_config((remap) ? GPIOB : GPIOA, (remap) ? GPIO_PIN_4 : GPIO_PIN_6, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3);
+			break;
+		case TIM_CHANNEL_2:
+			BSP_GPIO_pin_config(GPIOA, (remap) ? GPIO_PIN_7 : GPIO_PIN_4, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3);
+			break;
+		case TIM_CHANNEL_3:
+			BSP_GPIO_pin_config(GPIOB, GPIO_PIN_0, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3);
+			break;
+		case TIM_CHANNEL_4:
+			BSP_GPIO_pin_config(GPIOB, GPIO_PIN_7, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_AF2_TIM3);
+			break;
+		default:
+			break;
+		}
+		break;
+	case TIMER4_ID:
+		switch (TIM_CHANNEL_x)
+		{
+		case TIM_CHANNEL_1:
+			BSP_GPIO_pin_config((remap) ? GPIOB : GPIOA, (remap) ? GPIO_PIN_6 : GPIO_PIN_11, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap) ? GPIO_AF2_TIM4 : GPIO_AF10_TIM4);
+			break;
+		case TIM_CHANNEL_2:
+			BSP_GPIO_pin_config((remap) ? GPIOB : GPIOA, (remap) ? GPIO_PIN_7 : GPIO_PIN_12, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap) ? GPIO_AF2_TIM4 : GPIO_AF10_TIM4);
+			break;
+		case TIM_CHANNEL_3:
+			BSP_GPIO_pin_config((remap) ? GPIOB : GPIOA, (remap) ? GPIO_PIN_8 : GPIO_PIN_13, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, (remap) ? GPIO_AF2_TIM4 : GPIO_AF10_TIM4);
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
 
-    TIM_OC_InitTypeDef TIM_OCInitStructure = {0};
+	TIM_OC_InitTypeDef TIM_OCInitStructure = {0};
 	TIM_OCInitStructure.OCMode = TIM_OCMODE_PWM1;
 	TIM_OCInitStructure.Pulse = 0;
 	TIM_OCInitStructure.OCPolarity = TIM_OCPOLARITY_HIGH;
 	TIM_OCInitStructure.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-	TIM_OCInitStructure.OCFastMode = TIM_OCFAST_DISABLE; //disable the fast state
+	TIM_OCInitStructure.OCFastMode = TIM_OCFAST_DISABLE; // disable the fast state
 	TIM_OCInitStructure.OCNIdleState = TIM_OCNIDLESTATE_RESET;
 	TIM_OCInitStructure.OCIdleState = TIM_OCIDLESTATE_RESET;
 	HAL_TIM_PWM_Init(&structure_handles[timer_id]);
-	HAL_TIM_PWM_ConfigChannel(&structure_handles[timer_id], &TIM_OCInitStructure, TIM_CHANNEL_x); //on configure le canal (avant on autorisait le prechargement de la config)
-	if(negative_channel)
+	HAL_TIM_PWM_ConfigChannel(&structure_handles[timer_id], &TIM_OCInitStructure, TIM_CHANNEL_x); // on configure le canal (avant on autorisait le prechargement de la config)
+	if (negative_channel)
 		HAL_TIMEx_PWMN_Start(&structure_handles[timer_id], TIM_CHANNEL_x);
 	else
 		HAL_TIM_PWM_Start(&structure_handles[timer_id], TIM_CHANNEL_x);
@@ -376,10 +413,10 @@ void BSP_TIMER_enable_PWM(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint16_t 
  * @param TIM_CHANNEL_x canal de sortie
  * @param duty rapport cyclique de la PWM compris dans l'intervalle [0; 1000]
  */
-void BSP_TIMER_set_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x ,uint16_t duty)
+void BSP_TIMER_set_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint16_t duty)
 {
-	duty = MIN(duty, 1000);	// On s'assure que le duty cycle est compris entre 0 et 1000
-	duty = (uint16_t)((((uint32_t)(duty))*(structure_handles[timer_id].Init.Period+1))/1000U);
+	duty = MIN(duty, 1000); // On s'assure que le duty cycle est compris entre 0 et 1000
+	duty = (uint16_t)((((uint32_t)(duty)) * (structure_handles[timer_id].Init.Period + 1)) / 1000U);
 
 	__HAL_TIM_SET_COMPARE(&structure_handles[timer_id], TIM_CHANNEL_x, duty);
 }
@@ -393,11 +430,11 @@ void BSP_TIMER_set_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x ,uint16_t du
 void BSP_TIMER_set_period_with_same_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint32_t period)
 {
 	uint32_t previous_compare = __HAL_TIM_GET_COMPARE(&structure_handles[timer_id], TIM_CHANNEL_x);
-	uint32_t previous_period = structure_handles[timer_id].Init.Period+1;
+	uint32_t previous_period = structure_handles[timer_id].Init.Period + 1;
 	uint32_t duty;
 	BSP_TIMER_set_period(timer_id, period);
 
-	duty = (previous_compare*1000)/previous_period;
+	duty = (previous_compare * 1000) / previous_period;
 	BSP_TIMER_set_duty(timer_id, TIM_CHANNEL_x, duty);
 }
 
@@ -410,28 +447,23 @@ void BSP_TIMER_set_period_with_same_duty(timer_id_t timer_id, uint16_t TIM_CHANN
  */
 __weak void TIMER1_user_handler_it(void)
 {
-
 }
 
 __weak void TIMER2_user_handler_it(void)
 {
-
 }
 
 __weak void TIMER3_user_handler_it(void)
 {
-
 }
 
 __weak void TIMER4_user_handler_it(void)
 {
-
 }
-
 
 __weak void TIMER6_user_handler_it(void)
 {
-//	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, 1);
+	//	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, 1);
 }
 
 /**
@@ -440,115 +472,49 @@ __weak void TIMER6_user_handler_it(void)
  * @post	Acquittement du flag d'interruption, et appel de la fonction de l'utilisateur : TIMER1_user_handler_it()
  * @note	Nous n'avons PAS le choix du nom de cette fonction, c'est comme ça qu'elle est nommée dans le fichier startup.s !
  */
-void TIM1_UP_TIM16_IRQHandler(void){
-	if(__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER1_ID], TIM_IT_UPDATE) != RESET) 	//Si le flag est levé...
+void TIM1_UP_TIM16_IRQHandler(void)
+{
+	if (__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER1_ID], TIM_IT_UPDATE) != RESET) // Si le flag est levé...
 	{
-		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER1_ID], TIM_IT_UPDATE);				//...On l'acquitte...
-		TIMER1_user_handler_it();									//...Et on appelle la fonction qui nous intéresse
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER1_ID], TIM_IT_UPDATE); //...On l'acquitte...
+		TIMER1_user_handler_it();										  //...Et on appelle la fonction qui nous intéresse
 	}
 }
 
-void TIM2_IRQHandler(void){
-	if(__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER2_ID], TIM_IT_UPDATE) != RESET) 	//Si le flag est levé...
+void TIM2_IRQHandler(void)
+{
+	if (__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER2_ID], TIM_IT_UPDATE) != RESET) // Si le flag est levé...
 	{
-		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER2_ID], TIM_IT_UPDATE);				//...On l'acquitte...
-		TIMER2_user_handler_it();									//...Et on appelle la fonction qui nous intéresse
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER2_ID], TIM_IT_UPDATE); //...On l'acquitte...
+		TIMER2_user_handler_it();										  //...Et on appelle la fonction qui nous intéresse
 	}
 }
 
-void TIM3_IRQHandler(void){
-	if(__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER3_ID], TIM_IT_UPDATE) != RESET) 	//Si le flag est levé...
+void TIM3_IRQHandler(void)
+{
+	if (__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER3_ID], TIM_IT_UPDATE) != RESET) // Si le flag est levé...
 	{
-		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER3_ID], TIM_IT_UPDATE);				//...On l'acquitte...
-		TIMER3_user_handler_it();									//...Et on appelle la fonction qui nous intéresse
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER3_ID], TIM_IT_UPDATE); //...On l'acquitte...
+		TIMER3_user_handler_it();										  //...Et on appelle la fonction qui nous intéresse
 	}
 }
 
-void TIM4_IRQHandler(void){
-	if(__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER4_ID], TIM_IT_UPDATE) != RESET) 	//Si le flag est levé...
+void TIM4_IRQHandler(void)
+{
+	if (__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER4_ID], TIM_IT_UPDATE) != RESET) // Si le flag est levé...
 	{
-		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER4_ID], TIM_IT_UPDATE);				//...On l'acquitte...
-		TIMER4_user_handler_it();									//...Et on appelle la fonction qui nous intéresse
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER4_ID], TIM_IT_UPDATE); //...On l'acquitte...
+		TIMER4_user_handler_it();										  //...Et on appelle la fonction qui nous intéresse
 	}
 }
 
 void TIM6_DAC_IRQHandler(void)
 {
-	if(__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER6_ID], TIM_IT_UPDATE) != RESET) 	//Si le flag est levé...
+	if (__HAL_TIM_GET_IT_SOURCE(&structure_handles[TIMER6_ID], TIM_IT_UPDATE) != RESET) // Si le flag est levé...
 	{
-		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER6_ID], TIM_IT_UPDATE);				//...On l'acquitte...
-		TIMER6_user_handler_it();									//...Et on appelle la fonction qui nous intéresse
+		__HAL_TIM_CLEAR_IT(&structure_handles[TIMER6_ID], TIM_IT_UPDATE); //...On l'acquitte...
+		TIMER6_user_handler_it();										  //...Et on appelle la fonction qui nous intéresse
 	}
-
-}
-
-/**
- * @brief Set timer frequency in Hz
- * @param timer_id: Timer identifier
- * @param frequency_hz: Desired frequency in Hz
- * @retval None
- */
- void BSP_TIMER_set_frequency_Hz(timer_id_t timer_id, float frequency_hz) {
-    if (frequency_hz <= 0) {
-        frequency_hz = 1.0f; // Avoid division by zero, minimum 1 Hz
-    }
-    
-    TIM_TypeDef* TIMx = NULL;
-    
-    // Get timer instance based on timer_id
-    switch (timer_id) {
-        case TIMER1_ID:
-            TIMx = TIM1;
-            break;
-        case TIMER2_ID:
-            TIMx = TIM2;
-            break;
-        case TIMER3_ID:
-            TIMx = TIM3;
-            break;
-        case TIMER4_ID:
-            TIMx = TIM4;
-            break;
-        // Add other timers as needed
-        default:
-            return; // Invalid timer ID
-    }
-    
-    // Calculate timer period based on desired frequency
-    // Timer clock might be different from system clock, adjust if necessary
-    uint32_t timer_clock = HAL_RCC_GetPCLK1Freq(); // Usually timers run on APB1 clock
-    if (TIMx == TIM1) {
-        timer_clock = HAL_RCC_GetPCLK2Freq(); // TIM1 usually on APB2
-    }
-    
-    // For most timers, if APBx prescaler is not 1, frequency is multiplied by 2
-    if (timer_clock != SystemCoreClock) {
-        timer_clock *= 2;
-    }
-    
-    // Calculate period for desired frequency
-    // Period = timer_clock / frequency_hz - 1
-    uint32_t period = (uint32_t)((timer_clock / frequency_hz) - 1);
-    
-    // Set timer prescaler to 0 and period to the calculated value
-    TIMx->PSC = 0;
-    TIMx->ARR = period;
-    
-    // Generate update event to apply new settings
-    TIMx->EGR = TIM_EGR_UG;
-}
-
-/**
- * @brief Disable PWM output on a timer channel
- * @param timer_id: Timer identifier
- * @param TIM_CHANNEL_x: Timer channel
- * @retval None
- */
- void BSP_TIMER_disable_PWM(timer_id_t timer_id, uint16_t TIM_CHANNEL_x) {
-    TIM_HandleTypeDef* htim = BSP_TIMER_get_handler(timer_id);
-    if (htim != NULL) {
-        HAL_TIM_PWM_Stop(htim, TIM_CHANNEL_x);
-    }
 }
 
 #endif /* USE_BSP_TIMER */
