@@ -110,7 +110,8 @@ void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
                       direction ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
     // Calculate the pulse frequency based on speed (steps per second)
-    uint32_t pulse_freq_hz = (uint32_t)(speed);
+    // Force minimum speed to 20kHz for better motor performance
+    uint32_t pulse_freq_hz = (uint32_t)(speed < 20000.0f ? 20000.0f : speed);
     uint32_t timer_period_us = 1000000 / pulse_freq_hz / 2; // Convert to microseconds, divide by 2 for 50% duty cycle
 
     // Configure the timer for step pulses
@@ -124,7 +125,6 @@ void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
         stepper_motors[id].current_position -= steps;
 
     // Add delay to reach the target steps by waiting for the appropriate time
-    // This is a simplified approach - in a real application, you'd use interrupts or a more sophisticated method
     uint32_t delay_time_ms = (steps * 1000) / (pulse_freq_hz);
     HAL_Delay(delay_time_ms);
 
@@ -152,8 +152,13 @@ void STEPPER_move_to_mm(stepper_id_t id, float position_mm, float speed_mm_s)
     // Calculate steps to move
     int32_t steps = (int32_t)(distance_mm * stepper_motors[id].steps_per_mm);
 
-    // Calculate speed in steps per second
-    float steps_per_second = speed_mm_s * stepper_motors[id].steps_per_mm;
+    // Calculate speed in steps per second - adjust speed to maintain 20kHz minimum
+    float target_freq = 20000.0f; // 20kHz target frequency
+    float min_speed_mm_s = target_freq / stepper_motors[id].steps_per_mm;
+
+    // Use adjusted speed if less than minimum required for 20kHz
+    float adjusted_speed_mm_s = speed_mm_s < min_speed_mm_s ? min_speed_mm_s : speed_mm_s;
+    float steps_per_second = adjusted_speed_mm_s * stepper_motors[id].steps_per_mm;
 
     // Check if we need to move
     if (steps != 0)
@@ -189,8 +194,13 @@ void STEPPER_move_mm(stepper_id_t id, float distance_mm, float speed_mm_s)
     // Calculate steps to move
     int32_t steps = (int32_t)(distance_mm * stepper_motors[id].steps_per_mm);
 
-    // Calculate speed in steps per second
-    float steps_per_second = speed_mm_s * stepper_motors[id].steps_per_mm;
+    // Calculate speed in steps per second - adjust speed to maintain 20kHz minimum
+    float target_freq = 20000.0f; // 20kHz target frequency
+    float min_speed_mm_s = target_freq / stepper_motors[id].steps_per_mm;
+
+    // Use adjusted speed if less than minimum required for 20kHz
+    float adjusted_speed_mm_s = speed_mm_s < min_speed_mm_s ? min_speed_mm_s : speed_mm_s;
+    float steps_per_second = adjusted_speed_mm_s * stepper_motors[id].steps_per_mm;
 
     // Check if we need to move
     if (steps != 0)
@@ -386,8 +396,15 @@ void STEPPER_home_with_endstop(stepper_id_t id, float speed_mm_s, float max_trav
 
     printf("Homing motor %d...\n", id);
 
+    // Calculate base frequency requirement - targeting 20kHz for normal movement
+    float target_freq = 20000.0f; // 20kHz target
+    float min_speed_mm_s = target_freq / stepper_motors[id].steps_per_mm;
+
+    // Use adjusted speed if less than minimum required for 20kHz
+    float homing_speed_mm_s = speed_mm_s < min_speed_mm_s ? min_speed_mm_s : speed_mm_s;
+
     // First phase: Move towards endstop at normal speed
-    float steps_per_second = speed_mm_s * stepper_motors[id].steps_per_mm;
+    float steps_per_second = homing_speed_mm_s * stepper_motors[id].steps_per_mm;
     int32_t max_steps = (int32_t)(max_travel_mm * stepper_motors[id].steps_per_mm);
     int32_t steps_moved = 0;
     const int32_t steps_per_check = 50; // Check endstop every 50 steps
@@ -420,14 +437,14 @@ void STEPPER_home_with_endstop(stepper_id_t id, float speed_mm_s, float max_trav
         return;
     }
 
-    // Second phase: Back off from endstop
+    // Second phase: Back off from endstop - half the base speed (10kHz)
     HAL_Delay(100); // Short delay
 
     // Move away from endstop
     HAL_GPIO_WritePin(stepper_motors[id].dir_port, stepper_motors[id].dir_pin, GPIO_PIN_SET);
 
-    // Slower speed for precision
-    steps_per_second = (speed_mm_s / 2) * stepper_motors[id].steps_per_mm;
+    // Slower speed for precision (10kHz)
+    steps_per_second = (homing_speed_mm_s / 2) * stepper_motors[id].steps_per_mm;
     timer_period_us = 1000000 / (uint32_t)steps_per_second / 2;
     BSP_TIMER_run_us(stepper_motors[id].timer_id, timer_period_us, false);
     BSP_TIMER_enable_PWM(stepper_motors[id].timer_id, stepper_motors[id].timer_channel, 500, false, false);
@@ -440,14 +457,14 @@ void STEPPER_home_with_endstop(stepper_id_t id, float speed_mm_s, float max_trav
     // Stop the timer
     BSP_TIMER_stop(stepper_motors[id].timer_id);
 
-    // Third phase: Approach endstop again at slower speed
+    // Third phase: Approach endstop again at slower speed (5kHz)
     HAL_Delay(100);
 
     // Move towards endstop again
     HAL_GPIO_WritePin(stepper_motors[id].dir_port, stepper_motors[id].dir_pin, GPIO_PIN_RESET);
 
-    // Very slow speed for precision
-    steps_per_second = (speed_mm_s / 4) * stepper_motors[id].steps_per_mm;
+    // Very slow speed for precision (5kHz - quarter normal speed)
+    steps_per_second = (homing_speed_mm_s / 4) * stepper_motors[id].steps_per_mm;
     timer_period_us = 1000000 / (uint32_t)steps_per_second / 2;
     BSP_TIMER_run_us(stepper_motors[id].timer_id, timer_period_us, false);
     BSP_TIMER_enable_PWM(stepper_motors[id].timer_id, stepper_motors[id].timer_channel, 500, false, false);
