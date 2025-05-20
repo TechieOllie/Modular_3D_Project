@@ -5,8 +5,8 @@
 #### Setup Git correctement :
 
 - `git config --global credential.helper store`
-- `git config --global user.email "your.email@example.com"
-- `git config --global user.name "YourName"
+- `git config --global user.email "your.email@example.com"`
+- `git config --global user.name "YourName"`
 
 #### Installer STM32Cubeclt + STM32Cubeide :
 
