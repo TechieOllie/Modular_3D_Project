@@ -8,6 +8,7 @@
  */
 
 #include "stepper_motor.h"
+#include "stm32g4_systick.h"
 #include "stm32g4_timer.h"
 #include "stm32g4_gpio.h"
 #include <stdio.h>
@@ -110,26 +111,43 @@ void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
                       direction ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
     // Calculate the pulse frequency based on speed (steps per second)
-    // Force minimum speed to 20kHz for better motor performance
-    uint32_t pulse_freq_hz = (uint32_t)(speed < 20000.0f ? 20000.0f : speed);
-    uint32_t timer_period_us = 1000000 / pulse_freq_hz / 2; // Convert to microseconds, divide by 2 for 50% duty cycle
+    // Use a more reasonable minimum frequency (5kHz instead of 20kHz)
+    uint32_t pulse_freq_hz = (uint32_t)(speed < 5000.0f ? 5000.0f : speed);
 
-    // Configure the timer for step pulses
-    BSP_TIMER_run_us(stepper_motors[id].timer_id, timer_period_us, false);
-    BSP_TIMER_enable_PWM(stepper_motors[id].timer_id, stepper_motors[id].timer_channel, 500, false, false); // 50% duty cycle
+    // Calculate delay between steps in microseconds
+    uint32_t step_delay_us = 1000000 / pulse_freq_hz;
+
+    // Step pulse width in microseconds (typically 1-5μs is enough for most drivers)
+    uint32_t pulse_width_us = 5;
+
+    // Make sure pulse width is reasonable compared to step delay
+    if (pulse_width_us > (step_delay_us / 4))
+        pulse_width_us = step_delay_us / 4;
+
+    // Generate individual step pulses manually for precise control
+    for (int32_t i = 0; i < steps; i++)
+    {
+        // Generate STEP pulse - rising edge
+        HAL_GPIO_WritePin(stepper_motors[id].step_port, stepper_motors[id].step_pin, GPIO_PIN_SET);
+
+        // Hold pulse high for pulse width duration
+        Delay_us(pulse_width_us);
+
+        // End of pulse - falling edge
+        HAL_GPIO_WritePin(stepper_motors[id].step_port, stepper_motors[id].step_pin, GPIO_PIN_RESET);
+
+        // Delay until next step
+        if (i < steps - 1)
+        { // No need to delay after the last step
+            Delay_us(step_delay_us - pulse_width_us);
+        }
+    }
 
     // Update the current position
     if (direction)
         stepper_motors[id].current_position += steps;
     else
         stepper_motors[id].current_position -= steps;
-
-    // Add delay to reach the target steps by waiting for the appropriate time
-    uint32_t delay_time_ms = (steps * 1000) / (pulse_freq_hz);
-    HAL_Delay(delay_time_ms);
-
-    // Stop the timer after completing the move
-    BSP_TIMER_stop(stepper_motors[id].timer_id);
 }
 
 /**
