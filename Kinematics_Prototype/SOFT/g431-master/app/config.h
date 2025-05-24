@@ -78,7 +78,7 @@
 /*------------------Expanders------------------*/
 #define USE_MCP23017 0 // GPIO expander qui communique en i2C
 #define USE_MCP23S17 0 // GPIO expander qui communique en SPI
-#define USE_SD_CARD 0  // Carte SD pour lire/�crire des fichiers
+#define USE_SD_CARD 1  // Carte SD pour lire/�crire des fichiers
 
 /*------------------Actionneurs------------------*/
 #define USE_MOTOR_DC 0

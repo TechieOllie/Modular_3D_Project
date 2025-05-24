@@ -1,53 +1,51 @@
-/**
- *******************************************************************************
- * @file 	parser.h
- * @author 	naej, ol, your name
- * @date 	Current Date
- * @brief	G-code parser header
- *******************************************************************************
- */
+#ifndef PARSER_H_
+#define PARSER_H_
 
-#ifndef PARSER_H
-#define PARSER_H
-
+#include <stdint.h>
 #include <stdbool.h>
 
-#define MAX_GCODE_PARAMS 10
+// Command types
+typedef enum
+{
+    COMMAND_TYPE_NONE = 0,
+    COMMAND_TYPE_G,
+    COMMAND_TYPE_M,
+} command_type_t;
 
-// Structure to represent a G-code parameter (e.g., X100, Y200)
+// Command parameters bitfield
 typedef struct
 {
-    char letter; // Parameter letter (X, Y, Z, etc.)
-    float value; // Parameter value
-} GCodeParam;
+    uint16_t params; // Bitfield of which parameters are present
+    float x;         // X coordinate
+    float y;         // Y coordinate
+    float z;         // Z coordinate
+    float feed_rate; // F parameter - feedrate
+    float i;         // I parameter - arc center X offset
+    float j;         // J parameter - arc center Y offset
+    float p;         // P parameter - dwell time
+} command_params_t;
 
+// Command structure
 typedef struct
 {
-    int g_code;                      // e.g. 0 (rapid) or 1 (linear move)
-    float x, y, z;                   // target coordinates
-    float feedrate;                  // F code
-    bool has_x, has_y, has_z, has_f; // flags for optional fields
+    command_type_t type;     // G or M command
+    uint8_t code;            // Command number (e.g. 0 for G0)
+    command_params_t params; // Command parameters
+    bool valid;              // Whether the command is valid
+} parser_command_t;
 
-    // Parameters collection for more complex G-codes like G28
-    GCodeParam params[MAX_GCODE_PARAMS];
-    int numParams;
-} GCodeCommand;
+// Parameter bit definitions
+#define PARAM_X (1 << 0)
+#define PARAM_Y (1 << 1)
+#define PARAM_Z (1 << 2)
+#define PARAM_F (1 << 3)
+#define PARAM_I (1 << 4)
+#define PARAM_J (1 << 5)
+#define PARAM_P (1 << 6)
 
-// Parse a single G-code line
-void parse_gcode_line(const char *line, GCodeCommand *cmd);
+// Function prototypes
+void parser_init(void);
+bool parser_parse_line(const char *line, parser_command_t *command);
+const char *parser_get_error(void);
 
-// Parse a G-code file and call the callback function for each command
-bool parse_gcode_file(const char *filename, void (*callback)(GCodeCommand *cmd));
-
-// Process a string containing G-code commands
-void process_gcode_string(const char *gcode, void (*callback)(GCodeCommand *cmd));
-
-/**
- * Parse a G-code command string and fill a GCodeCommand structure
- * @param cmd_str The G-code command string to parse
- * @param cmd Pointer to a GCodeCommand structure to fill
- * @return true if parsing was successful, false otherwise
- */
-bool parse_gcode(const char *cmd_str, GCodeCommand *cmd);
-
-#endif /* PARSER_H */
+#endif /* PARSER_H_ */

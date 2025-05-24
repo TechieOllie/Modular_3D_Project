@@ -1,216 +1,160 @@
-/**
- *******************************************************************************
- * @file 	parser.c
- * @author 	naej, ol, your name
- * @date 	Current Date
- * @brief	G-code parser implementation
- *******************************************************************************
- */
-
-#include "config.h"
+#include "parser.h"
 #include <string.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <ctype.h>
-#include "parser.h"
 #include <stdio.h>
 
-void parse_gcode_line(const char *line, GCodeCommand *cmd)
+// Error message buffer
+static char error_message[80];
+
+// Initialize the parser
+void parser_init(void)
 {
-    memset(cmd, 0, sizeof(GCodeCommand)); // Zero everything
-    cmd->g_code = -1;                     // Invalid G-code by default
-    cmd->numParams = 0;                   // Start with no parameters
-
-    const char *ptr = line;
-    while (*ptr)
-    {
-        // Skip whitespace and comments
-        if (isspace(*ptr))
-        {
-            ptr++;
-            continue;
-        }
-
-        // Skip comments that start with '(' or ';'
-        if (*ptr == '(' || *ptr == ';')
-        {
-            break;
-        }
-
-        // Parse letter-number pairs
-        char letter = toupper(*ptr++);
-
-        // Skip if not a valid letter code
-        if (!isalpha(letter))
-        {
-            continue;
-        }
-
-        // Read the number after the letter
-        char buffer[32] = {0};
-        int i = 0;
-
-        while (*ptr && (isdigit(*ptr) || *ptr == '.' || *ptr == '-'))
-        {
-            buffer[i++] = *ptr++;
-        }
-
-        if (i == 0)
-        {
-            // No number after letter, add it as a parameter anyway
-            // This handles bare parameters like "X" in "G28 X"
-            if (cmd->numParams < MAX_GCODE_PARAMS)
-            {
-                cmd->params[cmd->numParams].letter = letter;
-                cmd->params[cmd->numParams].value = 0;
-                cmd->numParams++;
-            }
-            continue;
-        }
-
-        float value = atof(buffer);
-
-        // Store as a parameter for all letters
-        if (cmd->numParams < MAX_GCODE_PARAMS)
-        {
-            cmd->params[cmd->numParams].letter = letter;
-            cmd->params[cmd->numParams].value = value;
-            cmd->numParams++;
-        }
-
-        // Process the letter-number pair
-        switch (letter)
-        {
-        case 'G':
-            cmd->g_code = (int)value;
-            break;
-        case 'X':
-            cmd->x = value;
-            cmd->has_x = true;
-            break;
-        case 'Y':
-            cmd->y = value;
-            cmd->has_y = true;
-            break;
-        case 'Z':
-            cmd->z = value;
-            cmd->has_z = true;
-            break;
-        case 'F':
-            cmd->feedrate = value;
-            cmd->has_f = true;
-            break;
-            // Other parameters are already stored in the params array
-        }
-    }
+    // Initialize any parser state here if needed
+    error_message[0] = '\0';
 }
 
-/**
- * Parse a G-code command string and fill a GCodeCommand structure
- * @param cmd_str The G-code command string to parse
- * @param cmd Pointer to a GCodeCommand structure to fill
- * @return true if parsing was successful, false otherwise
- */
-bool parse_gcode(const char *cmd_str, GCodeCommand *cmd)
+// Get the last error message
+const char *parser_get_error(void)
 {
-    // Initialize the command structure
-    memset(cmd, 0, sizeof(GCodeCommand));
-    cmd->g_code = -1; // Invalid G-code by default
+    return error_message;
+}
+
+// Helper function to clear a command struct
+static void clear_command(parser_command_t *command)
+{
+    command->type = COMMAND_TYPE_NONE;
+    command->code = 0;
+    command->params.params = 0;
+    command->params.x = 0.0f;
+    command->params.y = 0.0f;
+    command->params.z = 0.0f;
+    command->params.feed_rate = 0.0f;
+    command->params.i = 0.0f;
+    command->params.j = 0.0f;
+    command->params.p = 0.0f;
+    command->valid = false;
+}
+
+// Parse a line of G-code
+bool parser_parse_line(const char *line, parser_command_t *command)
+{
+    if (!line || !command)
+    {
+        sprintf(error_message, "Invalid input");
+        return false;
+    }
+
+    // Clear the command
+    clear_command(command);
 
     // Skip leading whitespace
-    while (*cmd_str && isspace(*cmd_str))
-    {
-        cmd_str++;
-    }
+    while (isspace((unsigned char)*line))
+        line++;
 
-    // Check if the string is empty or only whitespace
-    if (!*cmd_str)
+    // Check for empty line or comment
+    if (*line == '\0' || *line == ';' || *line == '(')
     {
         return false;
     }
 
-    // Parse the command line
-    parse_gcode_line(cmd_str, cmd);
-
-    // Return true if a valid G-code was found
-    return (cmd->g_code >= 0);
-}
-
-bool parse_gcode_file(const char *filename, void (*callback)(GCodeCommand *cmd))
-{
-    FILE *file = fopen(filename, "r");
-    if (!file)
+    // Parse the command type (G or M)
+    if (toupper((unsigned char)*line) == 'G')
     {
-        printf("Failed to open G-code file: %s\n", filename);
+        command->type = COMMAND_TYPE_G;
+        line++;
+    }
+    else if (toupper((unsigned char)*line) == 'M')
+    {
+        command->type = COMMAND_TYPE_M;
+        line++;
+    }
+    else
+    {
+        sprintf(error_message, "Unknown command type: %c", *line);
         return false;
     }
 
-    char line[256];
-    GCodeCommand cmd;
-
-    while (fgets(line, sizeof(line), file))
+    // Parse the command code number
+    char *end;
+    command->code = (uint8_t)strtol(line, &end, 10);
+    if (line == end)
     {
-        // Remove trailing newline
-        size_t len = strlen(line);
-        if (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+        sprintf(error_message, "Invalid command code");
+        return false;
+    }
+    line = end;
+
+    // Parse parameters
+    while (*line != '\0' && *line != ';')
+    {
+        // Skip whitespace
+        while (isspace((unsigned char)*line))
+            line++;
+
+        if (*line == '\0' || *line == ';')
+            break;
+
+        // Get parameter letter
+        char param = toupper((unsigned char)*line++);
+
+        // Skip any whitespace between letter and value
+        while (isspace((unsigned char)*line))
+            line++;
+
+        // Parse parameter value
+        if (*line == '\0' || *line == ';')
         {
-            line[len - 1] = '\0';
+            sprintf(error_message, "Missing value for parameter %c", param);
+            return false;
         }
 
-        // Parse the line
-        parse_gcode_line(line, &cmd);
-
-        // Only process valid G-codes
-        if (cmd.g_code >= 0)
+        float value = strtof(line, &end);
+        if (line == end)
         {
-            callback(&cmd);
+            sprintf(error_message, "Invalid value for parameter %c", param);
+            return false;
+        }
+        line = end;
+
+        // Set parameter in command
+        switch (param)
+        {
+        case 'X':
+            command->params.params |= PARAM_X;
+            command->params.x = value;
+            break;
+        case 'Y':
+            command->params.params |= PARAM_Y;
+            command->params.y = value;
+            break;
+        case 'Z':
+            command->params.params |= PARAM_Z;
+            command->params.z = value;
+            break;
+        case 'F':
+            command->params.params |= PARAM_F;
+            command->params.feed_rate = value;
+            break;
+        case 'I':
+            command->params.params |= PARAM_I;
+            command->params.i = value;
+            break;
+        case 'J':
+            command->params.params |= PARAM_J;
+            command->params.j = value;
+            break;
+        case 'P':
+            command->params.params |= PARAM_P;
+            command->params.p = value;
+            break;
+        default:
+            // Ignore unknown parameters
+            break;
         }
     }
 
-    fclose(file);
+    // Command is valid
+    command->valid = true;
     return true;
-}
-
-void process_gcode_string(const char *gcode, void (*callback)(GCodeCommand *cmd))
-{
-    char line[256];
-    size_t i = 0;
-
-    while (*gcode)
-    {
-        if (*gcode == '\n' || *gcode == '\r' || *gcode == '\0')
-        {
-            line[i] = '\0';
-            if (i > 0)
-            { // Non-empty line
-                GCodeCommand cmd;
-                parse_gcode_line(line, &cmd);
-                if (cmd.g_code >= 0)
-                {
-                    callback(&cmd);
-                }
-            }
-            i = 0;
-        }
-        else
-        {
-            if (i < sizeof(line) - 1)
-            {
-                line[i++] = *gcode;
-            }
-        }
-        gcode++;
-    }
-
-    // Process the last line if there's no trailing newline
-    if (i > 0)
-    {
-        line[i] = '\0';
-        GCodeCommand cmd;
-        parse_gcode_line(line, &cmd);
-        if (cmd.g_code >= 0)
-        {
-            callback(&cmd);
-        }
-    }
 }

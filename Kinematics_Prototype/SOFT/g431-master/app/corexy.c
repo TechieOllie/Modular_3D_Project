@@ -1,439 +1,701 @@
 /**
  *******************************************************************************
- * @file 	corexy.c
- * @author 	naej, your name
- * @date 	Current Date
- * @brief	CoreXY kinematics implementation for CNC control
+ * @file    corexy.c
+ * @author  Your Name
+ * @date    Current Date
+ * @brief   CoreXY kinematics implementation for NEMA 17 stepper motors
  *******************************************************************************
  */
 
-#include "config.h"
 #include "corexy.h"
 #include "stepper_motor.h"
-/* System includes - correct order is important */
-#include <stdint.h>
-#include <stddef.h>
-#include <string.h>
-#include <stdlib.h>
+#include "stm32g4_gpio.h"
+#include "stm32g4_timer.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
-// Current position tracking
-static float current_position[3] = {0.0f, 0.0f, 0.0f}; // X, Y, Z
-static float default_feedrate = 500.0f;                // Default feedrate in mm/min (increased for better performance)
-static bool absolute_positioning_mode = true;          // Default to absolute positioning (G90)
+// Motor IDs for CoreXY system
+static stepper_id_t motor_a = -1; // First CoreXY motor (A)
+static stepper_id_t motor_b = -1; // Second CoreXY motor (B)
+static stepper_id_t motor_z = -1; // Z axis motor
 
-// Stepper motor IDs
-static stepper_id_t motor_x; // First CoreXY motor
-static stepper_id_t motor_y; // Second CoreXY motor
-static stepper_id_t motor_z; // Z-axis motor
+// Current position and state tracking
+static float current_position[3] = {0.0f, 0.0f, 0.0f}; // X, Y, Z in mm
+static corexy_state_t current_state = COREXY_STATE_IDLE;
+static bool absolute_positioning = true; // Default is absolute positioning (G90)
+static float default_feedrate = 1000.0f; // Default feedrate in mm/min
 
-// Machine dimensions
-static CoreXY_Dimensions_t machine_dimensions = {
-    .max_x_mm = 200.0f, // Default X dimension (200mm)
-    .max_y_mm = 200.0f, // Default Y dimension (200mm)
-    .max_z_mm = 200.0f  // Default Z dimension (200mm)
-};
+// CoreXY dimensions (build volume)
+static corexy_dimensions_t machine_dimensions = {
+    .max_x_mm = 220.0f,
+    .max_y_mm = 220.0f,
+    .max_z_mm = 250.0f};
 
-// Internal IDs for stepper motors
-static stepper_id_t x_stepper_id = -1;
-static stepper_id_t y_stepper_id = -1;
-static stepper_id_t z_stepper_id = -1;
+// Movement tracking
+static corexy_move_type_t current_move_type = COREXY_MOVE_RAPID;
+static corexy_callback_t move_callback = NULL;
+static uint32_t last_state_update = 0;
+static const uint32_t STATE_UPDATE_INTERVAL_MS = 20; // State machine update interval
 
-// Convert X,Y coordinates to A,B motor movements (CoreXY kinematics)
+// Movement completion tracking
+static bool motor_a_done = false;
+static bool motor_b_done = false;
+static bool motor_z_done = false;
+static bool homing_in_progress = false;
+
+// Forward declarations for internal functions
+static void xy_to_ab(float x, float y, float *a, float *b);
+static bool check_bounds(float x, float y, float z);
+static void motor_a_callback(stepper_id_t id, bool success);
+static void motor_b_callback(stepper_id_t id, bool success);
+static void motor_z_callback(stepper_id_t id, bool success);
+static void homing_completed_callback(bool success);
+
+// Convert Cartesian XY coordinates to CoreXY AB motor positions
 static void xy_to_ab(float x, float y, float *a, float *b)
 {
-    *a = x + y; // Motor A = X + Y
-    *b = x - y; // Motor B = X - Y
+    // CoreXY kinematics: A = X+Y, B = X-Y
+    *a = x + y;
+    *b = x - y;
 }
 
+// Check if coordinates are within machine bounds
+static bool check_bounds(float x, float y, float z)
+{
+    if (x < 0 || x > machine_dimensions.max_x_mm)
+    {
+        printf("Error: X position %.2f out of bounds (0-%.2f)\n",
+               x, machine_dimensions.max_x_mm);
+        return false;
+    }
+
+    if (y < 0 || y > machine_dimensions.max_y_mm)
+    {
+        printf("Error: Y position %.2f out of bounds (0-%.2f)\n",
+               y, machine_dimensions.max_y_mm);
+        return false;
+    }
+
+    if (z < 0 || z > machine_dimensions.max_z_mm)
+    {
+        printf("Error: Z position %.2f out of bounds (0-%.2f)\n",
+               z, machine_dimensions.max_z_mm);
+        return false;
+    }
+
+    return true;
+}
+
+// Initialize the CoreXY system
 void CoreXY_Init(void)
 {
-    // Initialize the stepper motor module
+    printf("Initializing CoreXY system...\n");
+
+    // Initialize stepper motors
     STEPPER_init();
 
-    // Set default positioning mode to absolute (G90)
-    absolute_positioning_mode = true;
+    // Motor configuration for NEMA 17 at 1.5A
+    float xy_steps_per_mm = 80.0f; // Steps per mm with microstepping
+    uint8_t microstepping = 16;    // 1/16 microstepping
+    float current_limit = 1.5f;    // 1.5A current limit for NEMA 17 motors
 
-    // Configure with NEMA 17 specific settings
-    // NEMA 17 typically has 200 steps per revolution (1.8° per step)
-    // For a GT2 pulley with 20 teeth (2mm pitch), one revolution = 40mm
-    // So steps_per_mm = 200/40 = 5 steps/mm
-    float steps_per_mm = 80.0f;
-    uint8_t microstepping = 16;   // Using 1/16 microstepping for smoother motion
-    float current_limit_a = 1.5f; // Set to 1.2A (typical for NEMA17)
+    // Add first CoreXY motor (A)
+    // According to stm32g4_timer.c, this uses GPIO PB4 for step and PA6 for direction
+    motor_a = STEPPER_add(GPIOB, GPIO_PIN_4, GPIOA, GPIO_PIN_6,
+                          TIMER3_ID, TIM_CHANNEL_1, xy_steps_per_mm, microstepping, current_limit);
 
-    // Add the motors to the system
-    motor_x = STEPPER_add(GPIOB, GPIO_PIN_4, GPIOA, GPIO_PIN_6,
-                          TIMER3_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    // Add second CoreXY motor (B)
+    // Using GPIO PA10 for step and PA11 for direction with Timer 4
+    motor_b = STEPPER_add(GPIOA, GPIO_PIN_10, GPIOA, GPIO_PIN_11,
+                          TIMER4_ID, TIM_CHANNEL_1, xy_steps_per_mm, microstepping, current_limit);
 
-    // motor_y = STEPPER_add(GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10,
-    //                     TIMER2_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    // Z axis typically has different steps/mm due to lead screw pitch
+    float z_steps_per_mm = 400.0f; // Example: 4-start 8mm pitch leadscrew with 1/16 microstepping
 
-    // motor_z = STEPPER_add(GPIOA, GPIO_PIN_11, GPIOA, GPIO_PIN_12,
-    //                    TIMER4_ID, TIM_CHANNEL_1, steps_per_mm, microstepping, current_limit_a);
+    // Add Z motor
+    // Using GPIO PA8 for step and PA9 for direction with Timer 2
+    motor_z = STEPPER_add(GPIOA, GPIO_PIN_8, GPIOA, GPIO_PIN_9,
+                          TIMER2_ID, TIM_CHANNEL_1, z_steps_per_mm, microstepping, current_limit);
 
-    // Store the motor IDs for later use
-    x_stepper_id = motor_x;
-    y_stepper_id = motor_y;
-    z_stepper_id = motor_z;
+    // Check if motors were successfully added
+    if (motor_a < 0 || motor_b < 0 || motor_z < 0)
+    {
+        printf("Error: Failed to initialize one or more motors!\n");
+        printf("Motor A: %d, Motor B: %d, Motor Z: %d\n", motor_a, motor_b, motor_z);
+        current_state = COREXY_STATE_ERROR;
+        return;
+    }
 
-    // Set default machine dimensions
-    CoreXY_SetMachineDimensions(200.0f, 200.0f, 200.0f);
+    // Initialize state variables
+    current_state = COREXY_STATE_IDLE;
+    absolute_positioning = true;
+    current_position[0] = 0.0f; // X
+    current_position[1] = 0.0f; // Y
+    current_position[2] = 0.0f; // Z
 
-    printf("CoreXY system initialized with NEMA 17 stepper motors\n");
-    printf("Using microstepping: 1/%d\n", microstepping);
+    printf("CoreXY system initialized with dimensions:\n");
+    printf("X: 0-%.1f mm, Y: 0-%.1f mm, Z: 0-%.1f mm\n",
+           machine_dimensions.max_x_mm, machine_dimensions.max_y_mm, machine_dimensions.max_z_mm);
+    printf("NEMA 17 motors: %d/16 microstepping, %.1fA current\n",
+           microstepping, current_limit);
 }
 
-// Set the machine dimensions
+// Process the CoreXY state machine
+void CoreXY_Process(void)
+{
+    // Only process at defined intervals to avoid hogging CPU
+    uint32_t current_time = HAL_GetTick();
+    if (current_time - last_state_update < STATE_UPDATE_INTERVAL_MS)
+    {
+        return;
+    }
+    last_state_update = current_time;
+
+    // Process based on current state
+    switch (current_state)
+    {
+    case COREXY_STATE_IDLE:
+        // Nothing to do in idle state
+        break;
+
+    case COREXY_STATE_MOVING:
+        // Check if all motors have completed their moves
+        if (!STEPPER_is_moving(motor_a) &&
+            !STEPPER_is_moving(motor_b) &&
+            !STEPPER_is_moving(motor_z))
+        {
+
+            current_state = COREXY_STATE_IDLE;
+            printf("Movement complete at X=%.2f Y=%.2f Z=%.2f\n",
+                   current_position[0], current_position[1], current_position[2]);
+
+            // Execute callback if provided
+            if (move_callback != NULL)
+            {
+                corexy_callback_t callback = move_callback;
+                move_callback = NULL;
+                callback(true);
+            }
+        }
+        break;
+
+    case COREXY_STATE_HOMING_Z:
+        if (!STEPPER_is_moving(motor_z))
+        {
+            current_position[2] = 0.0f; // Z is now at home position
+
+            if (homing_in_progress)
+            {
+                // Z homing complete, now move to X homing
+                current_state = COREXY_STATE_HOMING_X;
+                printf("Z homing complete, now homing X axis...\n");
+
+                // Start X homing
+                // In a CoreXY system, homing X requires moving both A and B motors
+                // For now, we'll simulate X homing by moving motor_a
+                if (!STEPPER_home(motor_a, motor_a_callback))
+                {
+                    current_state = COREXY_STATE_ERROR;
+                    printf("Failed to start X axis homing\n");
+                    homing_completed_callback(false);
+                }
+            }
+            else
+            {
+                // Only Z was requested to home
+                current_state = COREXY_STATE_IDLE;
+                printf("Z homing complete\n");
+                homing_completed_callback(true);
+            }
+        }
+        break;
+
+    case COREXY_STATE_HOMING_X:
+        if (!STEPPER_is_moving(motor_a))
+        {
+            current_position[0] = 0.0f; // X is now at home position
+
+            if (homing_in_progress)
+            {
+                // X homing complete, now move to Y homing
+                current_state = COREXY_STATE_HOMING_Y;
+                printf("X homing complete, now homing Y axis...\n");
+
+                // Start Y homing
+                // In a CoreXY system, homing Y requires moving both A and B motors
+                // For now, we'll simulate Y homing by moving motor_b
+                if (!STEPPER_home(motor_b, motor_b_callback))
+                {
+                    current_state = COREXY_STATE_ERROR;
+                    printf("Failed to start Y axis homing\n");
+                    homing_completed_callback(false);
+                }
+            }
+            else
+            {
+                // Only X was requested to home
+                current_state = COREXY_STATE_IDLE;
+                printf("X homing complete\n");
+                homing_completed_callback(true);
+            }
+        }
+        break;
+
+    case COREXY_STATE_HOMING_Y:
+        if (!STEPPER_is_moving(motor_b))
+        {
+            current_position[1] = 0.0f; // Y is now at home position
+            current_state = COREXY_STATE_IDLE;
+            printf("Y homing complete\n");
+
+            // All homing is now complete
+            homing_completed_callback(true);
+        }
+        break;
+
+    case COREXY_STATE_ERROR:
+        // Stay in error state until explicitly reset
+        break;
+    }
+}
+
+// Move to absolute coordinates
+bool CoreXY_MoveTo(float x, float y, float z, float feedrate, corexy_callback_t callback)
+{
+    // Check if system is ready for a new move
+    if (current_state != COREXY_STATE_IDLE)
+    {
+        printf("Error: System not ready for new move (state: %d)\n", current_state);
+        return false;
+    }
+
+    // Check boundaries
+    if (!check_bounds(x, y, z))
+    {
+        return false;
+    }
+
+    // Store target position
+    float target_position[3] = {x, y, z};
+
+    // Convert feedrate from mm/min to mm/sec
+    float speed_mm_s = feedrate / 60.0f;
+    if (speed_mm_s <= 0)
+    {
+        speed_mm_s = default_feedrate / 60.0f;
+    }
+
+    // Convert XY coordinates to CoreXY AB coordinates
+    float a_pos, b_pos;
+    xy_to_ab(x, y, &a_pos, &b_pos);
+
+    // Reset completion flags
+    motor_a_done = false;
+    motor_b_done = false;
+    motor_z_done = false;
+    move_callback = callback;
+
+    printf("Moving to X:%.2f Y:%.2f Z:%.2f at F:%.1f mm/min\n", x, y, z, feedrate);
+
+    // Start the movements
+    bool success = true;
+
+    // Move A motor (includes movement for both X and Y)
+    if (!STEPPER_move_to_mm(motor_a, a_pos, speed_mm_s, motor_a_callback))
+    {
+        printf("Error: Failed to start motor A movement\n");
+        success = false;
+    }
+
+    // Move B motor (includes movement for both X and Y)
+    if (!STEPPER_move_to_mm(motor_b, b_pos, speed_mm_s, motor_b_callback))
+    {
+        printf("Error: Failed to start motor B movement\n");
+        success = false;
+    }
+
+    // Move Z motor
+    if (!STEPPER_move_to_mm(motor_z, z, speed_mm_s, motor_z_callback))
+    {
+        printf("Error: Failed to start motor Z movement\n");
+        success = false;
+    }
+
+    if (success)
+    {
+        // Update current position and state
+        current_position[0] = x;
+        current_position[1] = y;
+        current_position[2] = z;
+        current_state = COREXY_STATE_MOVING;
+    }
+    else
+    {
+        // If any motor failed to start, emergency stop all
+        CoreXY_EmergencyStop();
+        current_state = COREXY_STATE_ERROR;
+
+        // Execute callback with failure
+        if (move_callback != NULL)
+        {
+            corexy_callback_t cb = move_callback;
+            move_callback = NULL;
+            cb(false);
+        }
+    }
+
+    return success;
+}
+
+// Move by relative distances
+bool CoreXY_MoveBy(float x, float y, float z, float feedrate, corexy_callback_t callback)
+{
+    float new_x = current_position[0] + x;
+    float new_y = current_position[1] + y;
+    float new_z = current_position[2] + z;
+
+    return CoreXY_MoveTo(new_x, new_y, new_z, feedrate, callback);
+}
+
+// Process a G-code command
+bool CoreXY_ProcessGCodeCommand(parser_command_t *cmd)
+{
+    if (cmd == NULL || !cmd->valid)
+    {
+        return false;
+    }
+
+    // Only process G-codes for now
+    if (cmd->type != COMMAND_TYPE_G)
+    {
+        printf("Warning: Non G-code commands not yet supported in CoreXY\n");
+        return false;
+    }
+
+    switch (cmd->code)
+    {
+    case 0: // G0: Rapid move
+    case 1: // G1: Linear move
+    {
+        current_move_type = (cmd->code == 0) ? COREXY_MOVE_RAPID : COREXY_MOVE_LINEAR;
+
+        // Extract coordinates from command
+        float x = current_position[0];
+        float y = current_position[1];
+        float z = current_position[2];
+        float feedrate = default_feedrate;
+
+        // Check which parameters were provided and update accordingly
+        if (cmd->params.params & PARAM_X)
+        {
+            // Apply X based on positioning mode
+            x = absolute_positioning ? cmd->params.x : current_position[0] + cmd->params.x;
+        }
+
+        if (cmd->params.params & PARAM_Y)
+        {
+            // Apply Y based on positioning mode
+            y = absolute_positioning ? cmd->params.y : current_position[1] + cmd->params.y;
+        }
+
+        if (cmd->params.params & PARAM_Z)
+        {
+            // Apply Z based on positioning mode
+            z = absolute_positioning ? cmd->params.z : current_position[2] + cmd->params.z;
+        }
+
+        if (cmd->params.params & PARAM_F)
+        {
+            feedrate = cmd->params.feed_rate;
+        }
+
+        // G0 typically uses a higher feedrate for rapid motion
+        if (cmd->code == 0 && !(cmd->params.params & PARAM_F))
+        {
+            feedrate = 3000.0f; // Default rapid feedrate: 3000 mm/min
+        }
+
+        // Execute the move
+        return CoreXY_MoveTo(x, y, z, feedrate, NULL);
+    }
+
+    case 28: // G28: Home
+    {
+        bool home_x = true;
+        bool home_y = true;
+        bool home_z = true;
+
+        // If parameters are specified, only home those axes
+        if (cmd->params.params & (PARAM_X | PARAM_Y | PARAM_Z))
+        {
+            home_x = (cmd->params.params & PARAM_X) != 0;
+            home_y = (cmd->params.params & PARAM_Y) != 0;
+            home_z = (cmd->params.params & PARAM_Z) != 0;
+        }
+
+        return CoreXY_Home(home_x, home_y, home_z, NULL);
+    }
+
+    case 90: // G90: Absolute positioning
+        CoreXY_SetAbsolutePositioning();
+        return true;
+
+    case 91: // G91: Relative positioning
+        CoreXY_SetRelativePositioning();
+        return true;
+
+    default:
+        printf("Warning: Unsupported G-code G%d\n", cmd->code);
+        return false;
+    }
+}
+
+// Home specific axes
+bool CoreXY_Home(bool home_x, bool home_y, bool home_z, corexy_callback_t callback)
+{
+    // Check if system is ready for homing
+    if (current_state != COREXY_STATE_IDLE)
+    {
+        printf("Error: System not ready for homing (state: %d)\n", current_state);
+        return false;
+    }
+
+    move_callback = callback;
+    homing_in_progress = home_x || home_y; // Whether we need to continue with XY after Z
+
+    printf("Homing");
+    if (home_z)
+        printf(" Z");
+    if (home_x)
+        printf(" X");
+    if (home_y)
+        printf(" Y");
+    printf(" axes...\n");
+
+    // Always home Z first for safety (to avoid collisions)
+    if (home_z)
+    {
+        current_state = COREXY_STATE_HOMING_Z;
+        if (!STEPPER_home(motor_z, motor_z_callback))
+        {
+            printf("Error: Failed to start Z homing\n");
+            current_state = COREXY_STATE_ERROR;
+            if (move_callback != NULL)
+            {
+                move_callback(false);
+                move_callback = NULL;
+            }
+            return false;
+        }
+    }
+    else if (home_x)
+    {
+        // If not homing Z, start with X
+        current_state = COREXY_STATE_HOMING_X;
+        if (!STEPPER_home(motor_a, motor_a_callback))
+        {
+            printf("Error: Failed to start X homing\n");
+            current_state = COREXY_STATE_ERROR;
+            if (move_callback != NULL)
+            {
+                move_callback(false);
+                move_callback = NULL;
+            }
+            return false;
+        }
+    }
+    else if (home_y)
+    {
+        // If only homing Y
+        current_state = COREXY_STATE_HOMING_Y;
+        if (!STEPPER_home(motor_b, motor_b_callback))
+        {
+            printf("Error: Failed to start Y homing\n");
+            current_state = COREXY_STATE_ERROR;
+            if (move_callback != NULL)
+            {
+                move_callback(false);
+                move_callback = NULL;
+            }
+            return false;
+        }
+    }
+    else
+    {
+        // Nothing to home!
+        if (move_callback != NULL)
+        {
+            move_callback(true);
+            move_callback = NULL;
+        }
+        return true;
+    }
+
+    return true;
+}
+
+// Emergency stop
+void CoreXY_EmergencyStop(void)
+{
+    printf("EMERGENCY STOP!\n");
+
+    // Stop all motors immediately
+    if (motor_a >= 0)
+        STEPPER_stop(motor_a);
+    if (motor_b >= 0)
+        STEPPER_stop(motor_b);
+    if (motor_z >= 0)
+        STEPPER_stop(motor_z);
+
+    // Reset state machine
+    current_state = COREXY_STATE_IDLE;
+
+    // Execute callback with failure if one is registered
+    if (move_callback != NULL)
+    {
+        corexy_callback_t callback = move_callback;
+        move_callback = NULL;
+        callback(false);
+    }
+}
+
+// Get current position
+void CoreXY_GetPosition(float *x, float *y, float *z)
+{
+    if (x)
+        *x = current_position[0];
+    if (y)
+        *y = current_position[1];
+    if (z)
+        *z = current_position[2];
+}
+
+// Set absolute positioning mode
+void CoreXY_SetAbsolutePositioning(void)
+{
+    absolute_positioning = true;
+    printf("Set to absolute positioning mode (G90)\n");
+}
+
+// Set relative positioning mode
+void CoreXY_SetRelativePositioning(void)
+{
+    absolute_positioning = false;
+    printf("Set to relative positioning mode (G91)\n");
+}
+
+// Get current positioning mode
+bool CoreXY_IsAbsolutePositioning(void)
+{
+    return absolute_positioning;
+}
+
+// Set machine dimensions
 void CoreXY_SetMachineDimensions(float max_x_mm, float max_y_mm, float max_z_mm)
 {
     machine_dimensions.max_x_mm = max_x_mm;
     machine_dimensions.max_y_mm = max_y_mm;
     machine_dimensions.max_z_mm = max_z_mm;
 
-    printf("Machine dimensions set to: X=%.1f, Y=%.1f, Z=%.1f mm\n",
+    printf("Machine dimensions set to X:%.1f Y:%.1f Z:%.1f mm\n",
            max_x_mm, max_y_mm, max_z_mm);
 }
 
-// Get the machine dimensions
-CoreXY_Dimensions_t CoreXY_GetMachineDimensions(void)
+// Get machine dimensions
+corexy_dimensions_t CoreXY_GetMachineDimensions(void)
 {
     return machine_dimensions;
 }
 
-// Move to the specified coordinates
-void CoreXY_MoveTo(float x, float y, float z, float feedrate)
+// Get current state
+corexy_state_t CoreXY_GetState(void)
 {
-    float a_pos, b_pos;
-
-    // Convert target X,Y to A,B coordinates
-    xy_to_ab(x, y, &a_pos, &b_pos);
-
-    // Convert feedrate from mm/min to mm/sec
-    float speed_mm_s = feedrate / 60.0f;
-
-    // Move the motors to their targets
-    STEPPER_move_to_mm(motor_x, a_pos, speed_mm_s);
-    STEPPER_move_to_mm(motor_y, b_pos, speed_mm_s);
-    STEPPER_move_to_mm(motor_z, z, speed_mm_s);
-
-    // Update position tracking
-    current_position[0] = x;
-    current_position[1] = y;
-    current_position[2] = z;
+    return current_state;
 }
 
-// Handle positioning mode in Move function if needed
-void CoreXY_Move(float x, float y, float z, float feedrate)
+// Motor movement callbacks
+static void motor_a_callback(stepper_id_t id, bool success)
 {
-    // For the Move function, we always treat inputs as relative offsets
-    // This ensures compatibility with existing code that calls Move
-    CoreXY_MoveTo(
-        current_position[0] + x,
-        current_position[1] + y,
-        current_position[2] + z,
-        feedrate);
-}
-
-// Process a G-code command
-void CoreXY_ProcessGCodeCommand(GCodeCommand *cmd)
-{
-    switch (cmd->g_code)
+    motor_a_done = true;
+    if (!success)
     {
-    case 0: // G0: Rapid positioning
-    case 1: // G1: Linear move
-    {
-        float x = current_position[0];
-        float y = current_position[1];
-        float z = current_position[2];
-        float f = default_feedrate;
-
-        // Update coordinates if specified
-        if (cmd->has_x)
-        {
-            // Apply X based on positioning mode
-            x = absolute_positioning_mode ? cmd->x : current_position[0] + cmd->x;
-        }
-
-        if (cmd->has_y)
-        {
-            // Apply Y based on positioning mode
-            y = absolute_positioning_mode ? cmd->y : current_position[1] + cmd->y;
-        }
-
-        if (cmd->has_z)
-        {
-            // Apply Z based on positioning mode
-            z = absolute_positioning_mode ? cmd->z : current_position[2] + cmd->z;
-        }
-
-        if (cmd->has_f)
-        {
-            f = cmd->feedrate;
-        }
-
-        CoreXY_MoveTo(x, y, z, f);
-
-        printf("Moved to X:%.2f Y:%.2f Z:%.2f F:%.2f (%s)\n",
-               x, y, z, f,
-               absolute_positioning_mode ? "absolute" : "relative");
-        break;
-    }
-
-    case 28: // G28: Home
-    {
-        // Check for axis-specific homing parameters (X, Y, Z)
-        bool home_x = true;
-        bool home_y = true;
-        bool home_z = true;
-
-        // If any axis is specified, only home those axes
-        bool specific_axes = false;
-
-        for (int i = 0; i < cmd->numParams; i++)
-        {
-            if (cmd->params[i].letter == 'X')
-            {
-                specific_axes = true;
-            }
-            else if (cmd->params[i].letter == 'Y')
-            {
-                specific_axes = true;
-            }
-            else if (cmd->params[i].letter == 'Z')
-            {
-                specific_axes = true;
-            }
-        }
-
-        // If specific axes were mentioned, start by assuming we don't home any
-        if (specific_axes)
-        {
-            home_x = false;
-            home_y = false;
-            home_z = false;
-
-            // Then enable only the ones specified
-            for (int i = 0; i < cmd->numParams; i++)
-            {
-                if (cmd->params[i].letter == 'X')
-                {
-                    home_x = true;
-                }
-                else if (cmd->params[i].letter == 'Y')
-                {
-                    home_y = true;
-                }
-                else if (cmd->params[i].letter == 'Z')
-                {
-                    home_z = true;
-                }
-            }
-        }
-
-        // Z should always be homed first for safety
-        if (home_z)
-        {
-            printf("Homing Z axis...\n");
-#if ENDSTOP_ENABLED
-            if (z_stepper_id >= 0)
-            {
-                STEPPER_home_with_endstop(z_stepper_id, 5.0f, -machine_dimensions.max_z_mm);
-            }
-#else
-            if (z_stepper_id >= 0)
-            {
-                STEPPER_home(z_stepper_id);
-            }
-#endif
-            current_position[2] = 0.0f;
-        }
-
-        // Then home X
-        if (home_x)
-        {
-            printf("Homing X axis...\n");
-#if ENDSTOP_ENABLED
-            if (x_stepper_id >= 0)
-            {
-                STEPPER_home_with_endstop(x_stepper_id, 5.0f, -machine_dimensions.max_x_mm);
-            }
-#else
-            if (x_stepper_id >= 0)
-            {
-                STEPPER_home(x_stepper_id);
-            }
-#endif
-            current_position[0] = 0.0f;
-        }
-
-        // Then home Y
-        if (home_y)
-        {
-            printf("Homing Y axis...\n");
-#if ENDSTOP_ENABLED
-            if (y_stepper_id >= 0)
-            {
-                STEPPER_home_with_endstop(y_stepper_id, 5.0f, -machine_dimensions.max_y_mm);
-            }
-#else
-            if (y_stepper_id >= 0)
-            {
-                STEPPER_home(y_stepper_id);
-            }
-#endif
-            current_position[1] = 0.0f;
-        }
-
-        printf("Homing complete\n");
-        break;
-    }
-
-    case 90: // G90: Absolute positioning
-        absolute_positioning_mode = true;
-        printf("Using absolute positioning\n");
-        break;
-
-    case 91: // G91: Relative positioning
-        absolute_positioning_mode = false;
-        printf("Using relative positioning\n");
-        break;
-
-    default:
-        printf("Unhandled G-code: G%d\n", cmd->g_code);
+        printf("Motor A move failed\n");
+        CoreXY_EmergencyStop();
     }
 }
 
-// Home the machine (simple version used when not called via G28)
-void CoreXY_Home(void)
+static void motor_b_callback(stepper_id_t id, bool success)
 {
-    // Create a G28 command with no parameters to home all axes
-    GCodeCommand cmd = {0};
-    cmd.g_code = 28;
-
-    // Process it using our enhanced G28 handler
-    CoreXY_ProcessGCodeCommand(&cmd);
+    motor_b_done = true;
+    if (!success)
+    {
+        printf("Motor B move failed\n");
+        CoreXY_EmergencyStop();
+    }
 }
 
-#if ENDSTOP_ENABLED
-// Configure endstops for the CoreXY system
-void CoreXY_ConfigureEndstops(
-    GPIO_TypeDef *x_min_port, uint16_t x_min_pin, uint8_t x_min_trigger_level,
-    GPIO_TypeDef *x_max_port, uint16_t x_max_pin, uint8_t x_max_trigger_level,
-    GPIO_TypeDef *y_min_port, uint16_t y_min_pin, uint8_t y_min_trigger_level,
-    GPIO_TypeDef *y_max_port, uint16_t y_max_pin, uint8_t y_max_trigger_level,
-    GPIO_TypeDef *z_min_port, uint16_t z_min_pin, uint8_t z_min_trigger_level,
-    GPIO_TypeDef *z_max_port, uint16_t z_max_pin, uint8_t z_max_trigger_level)
+static void motor_z_callback(stepper_id_t id, bool success)
 {
-    printf("Configuring CoreXY endstops...\n");
-
-    // Configure X-axis endstops
-    if (x_min_port != NULL && x_stepper_id >= 0)
+    motor_z_done = true;
+    if (!success)
     {
-        STEPPER_config_endstop(x_stepper_id, ENDSTOP_MIN, x_min_port, x_min_pin, x_min_trigger_level);
+        printf("Motor Z move failed\n");
+        CoreXY_EmergencyStop();
     }
-
-    if (x_max_port != NULL && x_stepper_id >= 0)
-    {
-        STEPPER_config_endstop(x_stepper_id, ENDSTOP_MAX, x_max_port, x_max_pin, x_max_trigger_level);
-    }
-
-    // Configure Y-axis endstops
-    if (y_min_port != NULL && y_stepper_id >= 0)
-    {
-        STEPPER_config_endstop(y_stepper_id, ENDSTOP_MIN, y_min_port, y_min_pin, y_min_trigger_level);
-    }
-
-    if (y_max_port != NULL && y_stepper_id >= 0)
-    {
-        STEPPER_config_endstop(y_stepper_id, ENDSTOP_MAX, y_max_port, y_max_pin, y_max_trigger_level);
-    }
-
-    // Configure Z-axis endstops
-    if (z_min_port != NULL && z_stepper_id >= 0)
-    {
-        STEPPER_config_endstop(z_stepper_id, ENDSTOP_MIN, z_min_port, z_min_pin, z_min_trigger_level);
-    }
-
-    if (z_max_port != NULL && z_stepper_id >= 0)
-    {
-        STEPPER_config_endstop(z_stepper_id, ENDSTOP_MAX, z_max_port, z_max_pin, z_max_trigger_level);
-    }
-
-    printf("CoreXY endstops configured successfully\n");
 }
 
-// Home all axes with configured endstops
-bool CoreXY_HomeAll(float homing_speed_mm_s)
+// Homing completed callback
+static void homing_completed_callback(bool success)
 {
-    bool success = true;
-    printf("Homing all CoreXY axes...\n");
-
-    // Home Z first for safety (to avoid collision with the bed)
-    if (z_stepper_id >= 0)
-    {
-        printf("Homing Z axis...\n");
-        success &= STEPPER_home_with_endstop(z_stepper_id, homing_speed_mm_s, machine_dimensions.max_z_mm);
-    }
-
-    // Home X and Y
-    if (x_stepper_id >= 0)
-    {
-        printf("Homing X axis...\n");
-        success &= STEPPER_home_with_endstop(x_stepper_id, homing_speed_mm_s, machine_dimensions.max_x_mm);
-    }
-
-    if (y_stepper_id >= 0)
-    {
-        printf("Homing Y axis...\n");
-        success &= STEPPER_home_with_endstop(y_stepper_id, homing_speed_mm_s, machine_dimensions.max_y_mm);
-    }
+    homing_in_progress = false;
 
     if (success)
     {
-        printf("All axes homed successfully\n");
+        printf("Homing completed successfully\n");
     }
     else
     {
-        printf("WARNING: Homing failed for one or more axes\n");
+        printf("Homing failed\n");
     }
 
-    return success;
+    if (move_callback != NULL)
+    {
+        corexy_callback_t callback = move_callback;
+        move_callback = NULL;
+        callback(success);
+    }
+}
+
+// Configure endstops for the CoreXY system
+#if ENDSTOP_ENABLED
+void CoreXY_ConfigureEndstops(
+    GPIO_TypeDef *x_min_port, uint16_t x_min_pin, uint8_t x_min_trigger_level,
+    GPIO_TypeDef *y_min_port, uint16_t y_min_pin, uint8_t y_min_trigger_level,
+    GPIO_TypeDef *z_min_port, uint16_t z_min_pin, uint8_t z_min_trigger_level)
+{
+    printf("Configuring CoreXY endstops...\n");
+
+    // X axis endstops (connected to motor_a)
+    if (x_min_port != NULL && motor_a >= 0)
+    {
+        STEPPER_config_endstop(motor_a, ENDSTOP_MIN, x_min_port, x_min_pin, x_min_trigger_level);
+        printf("X min endstop configured\n");
+    }
+
+    // Y axis endstops (connected to motor_b)
+    if (y_min_port != NULL && motor_b >= 0)
+    {
+        STEPPER_config_endstop(motor_b, ENDSTOP_MIN, y_min_port, y_min_pin, y_min_trigger_level);
+        printf("Y min endstop configured\n");
+    }
+
+    // Z axis endstops
+    if (z_min_port != NULL && motor_z >= 0)
+    {
+        STEPPER_config_endstop(motor_z, ENDSTOP_MIN, z_min_port, z_min_pin, z_min_trigger_level);
+        printf("Z min endstop configured\n");
+    }
 }
 #endif
-
-// Get current position
-void CoreXY_GetPosition(float *x, float *y, float *z)
-{
-    *x = current_position[0];
-    *y = current_position[1];
-    *z = current_position[2];
-}
-
-// Emergency stop
-void CoreXY_EmergencyStop(void)
-{
-    STEPPER_stop(motor_x);
-    STEPPER_stop(motor_y);
-    STEPPER_stop(motor_z);
-    printf("EMERGENCY STOP\n");
-}
-
-// Set absolute positioning mode
-void CoreXY_SetAbsolutePositioning(void)
-{
-    absolute_positioning_mode = true;
-}
-
-// Set relative positioning mode
-void CoreXY_SetRelativePositioning(void)
-{
-    absolute_positioning_mode = false;
-}
-
-// Get current positioning mode
-bool CoreXY_IsAbsolutePositioning(void)
-{
-    return absolute_positioning_mode;
-}

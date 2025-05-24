@@ -4,7 +4,10 @@
   "files.associations": {
     "stm32g4_sys.h": "c",
     "parser.h": "c",
-    "string.h": "c"
+    "string.h": "c",
+    "ff.h": "c",
+    "diskio.h": "c",
+    "stm32g4_sd.h": "c"
   },
   "remote.extensionKind": {
     "stmicroelectronics.stm32-vscode-extension": [

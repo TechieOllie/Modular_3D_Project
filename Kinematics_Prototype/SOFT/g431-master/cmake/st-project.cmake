@@ -77,6 +77,8 @@ target_link_options(
 
 target_sources(
     ${TARGET_NAME} PRIVATE
+    "app/command_buffer.c"
+    "app/command_executor.c"
     "app/corexy.c"
     "app/main.c"
     "app/parser.c"
