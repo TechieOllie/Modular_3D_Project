@@ -39,7 +39,7 @@ This project implements a CoreXY kinematics system for a 3D printer or CNC machi
 - **Timer Control** (`stm32g4_timer.h`) - Manages hardware timers for precise timing
 
 ## Hardware Configuration
-- **Microcontroller**: STM32G431 - NUCLEO-G431KB
+- **Microcontroller**: STM32G431 - [NUCLEO-G431KB](https://www.st.com/en/evaluation-tools/nucleo-g431kb.html#documentation)
 - **Communication**: UART at 115200 baud
 - **Status Indicator**: Green LED
 - **Build Volume**: 220x220x250mm (configurable)
