@@ -185,4 +185,6 @@ bool STEPPER_is_endstop_hit(stepper_id_t id, endstop_type_t endstop_type);
 bool STEPPER_home_with_endstop(stepper_id_t id, float homing_speed_mm_s, float max_travel_mm, stepper_callback_t callback);
 #endif
 
+bool STEPPER_test_motor(stepper_id_t id);
+
 #endif /* STEPPER_MOTOR_H_ */

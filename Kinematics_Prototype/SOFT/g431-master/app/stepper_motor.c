@@ -45,7 +45,7 @@
 #define MIN_FREQUENCY 2000.0f  // Minimum frequency for stepping (Hz)
 #define MAX_FREQUENCY 20000.0f // Maximum frequency for stepping (Hz)
 #define TIMER_PRESCALER 100    // Prescaler for timer counter
-#define PULSE_DUTY_CYCLE 20    // PWM duty cycle (percent)
+#define PULSE_DUTY_CYCLE 60    // PWM duty cycle (percent) - INCREASED TO 50%
 #define UPDATE_INTERVAL_MS 10  // How often to update acceleration curve (ms)
 #define ACCEL_UPDATES_PER_SEC (1000 / UPDATE_INTERVAL_MS)
 
@@ -214,25 +214,40 @@ static void set_direction(stepper_id_t id, bool forward)
 }
 
 // Update the timer frequency for a motor
+// Update frequency_profile to ensure movement completion
 static void update_motor_frequency(stepper_id_t id, float frequency)
 {
     if (!is_valid_motor(id))
         return;
 
-    // Only update if change is significant (>1%)
-    if (fabsf(steppers[id].current_frequency - frequency) > (steppers[id].current_frequency * 0.01f))
+    // Only update if change is significant (>1%) or turning off
+    if (frequency <= 1.0f ||
+        fabsf(steppers[id].current_frequency - frequency) > (steppers[id].current_frequency * 0.01f))
     {
         // If frequency is too low, disable PWM and return
         if (frequency < 1.0f)
         {
-            BSP_TIMER_stop(steppers[id].timer_id);
+            BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel);
             steppers[id].current_frequency = 0;
             return;
         }
 
-        // Otherwise, update the timer frequency
-        BSP_TIMER_set_period(steppers[id].timer_id, frequency);
+        // IMPORTANT CHANGE: Convert frequency to period (may need adjustment based on BSP_TIMER implementation)
+        // Period in microseconds = 1,000,000 / frequency in Hz
+        float period_us = 1000000.0f / frequency;
+
+        // Set timer period in microseconds
+        BSP_TIMER_set_period_us(steppers[id].timer_id, (uint32_t)period_us);
+
+        // Enable PWM with higher duty cycle for more reliable stepping
+        BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, 80, false, false);
+
+        // Update stored frequency
         steppers[id].current_frequency = frequency;
+
+        // Debug output for troubleshooting
+        printf("Motor %d: Set freq=%.1f Hz, period=%lu us\n",
+               id, frequency, (uint32_t)period_us);
     }
 }
 
@@ -298,7 +313,8 @@ bool STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed, stepper_cal
     steppers[id].state = STEPPER_STATE_ACCELERATING;
 
     // Start PWM with initial frequency
-    BSP_TIMER_set_period(steppers[id].timer_id, steppers[id].current_frequency);
+    float period_us = 1000000.0f / min_speed;
+    BSP_TIMER_set_period_us(steppers[id].timer_id, (uint32_t)period_us);
     BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, PULSE_DUTY_CYCLE, false, false);
 
     return true;
@@ -342,12 +358,30 @@ void STEPPER_stop(stepper_id_t id)
     if (!is_valid_motor(id))
         return;
 
+    printf("Stopping motor %d\n", id);
+
     // Disable PWM
-    BSP_TIMER_stop(steppers[id].timer_id);
+    if (BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel) != HAL_OK)
+    {
+        printf("Error: Failed to disable PWM for motor %d\n", id);
+
+        // Force PWM disable by directly accessing the timer
+        TIM_HandleTypeDef *htim = BSP_TIMER_get_handler(steppers[id].timer_id);
+        if (htim != NULL)
+        {
+            // Force disable the timer
+            htim->Instance->CR1 &= ~(TIM_CR1_CEN); // Disable counter
+            htim->Instance->CCER = 0;              // Disable all outputs
+        }
+    }
+
+    // Ensure the direction pin is at a safe level
+    HAL_GPIO_WritePin(steppers[id].dir_port, steppers[id].dir_pin, GPIO_PIN_RESET);
 
     // Update state
     steppers[id].state = STEPPER_STATE_IDLE;
     steppers[id].current_frequency = 0;
+    steppers[id].steps_taken = steppers[id].steps_to_move; // Mark movement as complete
 
     // Execute callback if provided
     if (steppers[id].callback != NULL)
@@ -356,6 +390,8 @@ void STEPPER_stop(stepper_id_t id)
         steppers[id].callback = NULL;
         callback(id, false); // Indicate movement was stopped early
     }
+
+    printf("Motor %d stopped\n", id);
 }
 
 // Check if motor is moving
@@ -408,33 +444,43 @@ bool STEPPER_home(stepper_id_t id, stepper_callback_t callback)
 // Process the stepper motor state machines
 void STEPPER_process(void)
 {
-    uint32_t current_time = HAL_GetTick();
-
-    // Process each motor
     for (stepper_id_t id = 0; id < STEPPER_COUNT; id++)
     {
-        if (!steppers[id].enabled || steppers[id].state == STEPPER_STATE_IDLE)
+        if (!is_valid_motor(id) || steppers[id].state == STEPPER_STATE_IDLE)
+            continue;
+
+        uint32_t current_time = HAL_GetTick();
+
+        // Check if the movement is complete
+        if (steppers[id].steps_taken >= steppers[id].steps_to_move)
         {
+            printf("Motor %d movement complete. Pos: %ld\n", id, steppers[id].current_position);
+
+            // Stop PWM
+            BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel);
+
+            // Set state to idle
+            steppers[id].state = STEPPER_STATE_IDLE;
+            steppers[id].current_frequency = 0;
+
+            // Call callback if provided
+            if (steppers[id].callback != NULL)
+            {
+                stepper_callback_t callback = steppers[id].callback;
+                steppers[id].callback = NULL;
+                callback(id, true);
+            }
+
             continue;
         }
-
-        // Only update at the specified interval
-        if (current_time - steppers[id].last_update_time < UPDATE_INTERVAL_MS)
-        {
-            continue;
-        }
-
-        // Update timestamp
-        steppers[id].last_update_time = current_time;
 
         // Process based on current state
         switch (steppers[id].state)
         {
         case STEPPER_STATE_ACCELERATING:
         {
-            // Calculate acceleration progress
-            float elapsed_ms = fminf(steppers[id].acceleration_time_ms,
-                                     steppers[id].steps_taken * 1000.0f / steppers[id].current_frequency);
+            // Calculate elapsed time as a percentage of acceleration time
+            float elapsed_ms = (float)(current_time - steppers[id].last_update_time);
             float progress = elapsed_ms / steppers[id].acceleration_time_ms;
 
             // Calculate new frequency using acceleration curve
@@ -445,10 +491,10 @@ void STEPPER_process(void)
             update_motor_frequency(id, new_freq);
 
             // Check if acceleration phase is complete
-            if (progress >= 0.99f ||
-                steppers[id].steps_taken >= steppers[id].steps_to_move / 2)
+            if (progress >= 1.0f || steppers[id].steps_taken >= steppers[id].steps_to_move / 2)
             {
                 steppers[id].state = STEPPER_STATE_CONSTANT_SPEED;
+                printf("Motor %d reached constant speed: %.1f Hz\n", id, new_freq);
             }
 
             break;
@@ -461,9 +507,17 @@ void STEPPER_process(void)
             int32_t steps_needed_to_stop = (int32_t)(steppers[id].current_frequency *
                                                      steppers[id].acceleration_time_ms / 1000.0f);
 
+            // Print debug info occasionally
+            if ((steppers[id].steps_taken % 100) == 0)
+            {
+                printf("Motor %d const - Pos: %ld, Remaining: %ld\n",
+                       id, steppers[id].current_position, steps_remaining);
+            }
+
             if (steps_remaining <= steps_needed_to_stop)
             {
                 steppers[id].state = STEPPER_STATE_DECELERATING;
+                printf("Motor %d starting deceleration, %ld steps remaining\n", id, steps_remaining);
             }
             break;
         }
@@ -474,14 +528,32 @@ void STEPPER_process(void)
             int32_t steps_remaining = steppers[id].steps_to_move - steppers[id].steps_taken;
             int32_t steps_needed_to_stop = (int32_t)(steppers[id].current_frequency *
                                                      steppers[id].acceleration_time_ms / 1000.0f);
+
+            // Ensure we don't divide by zero
+            if (steps_needed_to_stop <= 0)
+                steps_needed_to_stop = 1;
+
             float progress = 1.0f - (float)steps_remaining / (float)steps_needed_to_stop;
+            if (progress > 1.0f)
+                progress = 1.0f;
 
             // Calculate new frequency using deceleration curve
             float deceleration_factor = calculate_acceleration(1.0f - progress);
             float new_freq = MIN_FREQUENCY + (steppers[id].target_frequency - MIN_FREQUENCY) * deceleration_factor;
 
+            // Make sure we don't go below minimum frequency
+            if (new_freq < MIN_FREQUENCY)
+                new_freq = MIN_FREQUENCY;
+
             // Update motor frequency
             update_motor_frequency(id, new_freq);
+
+            // Print debug info occasionally
+            if ((steppers[id].steps_taken % 100) == 0)
+            {
+                printf("Motor %d decel - Pos: %ld, Freq: %.1f, Progress: %.2f\n",
+                       id, steppers[id].current_position, new_freq, progress);
+            }
 
             break;
         }
@@ -520,24 +592,6 @@ void STEPPER_process(void)
 
         default:
             break;
-        }
-
-        // Check if movement is complete
-        if (steppers[id].steps_taken >= steppers[id].steps_to_move &&
-            steppers[id].state != STEPPER_STATE_HOMING)
-        {
-
-            // Disable PWM and update state
-            BSP_TIMER_stop(steppers[id].timer_id);
-            steppers[id].state = STEPPER_STATE_IDLE;
-
-            // Execute callback if provided
-            if (steppers[id].callback != NULL)
-            {
-                stepper_callback_t callback = steppers[id].callback;
-                steppers[id].callback = NULL;
-                callback(id, true);
-            }
         }
     }
 }
@@ -584,6 +638,8 @@ static void motor_step_handler(stepper_id_t id)
             // Stop the motor immediately
             BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel);
             steppers[id].state = STEPPER_STATE_IDLE;
+
+            printf("Motor %d hit endstop at position %ld\n", id, steppers[id].current_position);
 
             // Call callback if provided
             if (steppers[id].callback != NULL)
@@ -789,10 +845,42 @@ bool STEPPER_home_with_endstop(stepper_id_t id, float homing_speed_mm_s, float m
     steppers[id].state = STEPPER_STATE_HOMING;
 
     // Start PWM with initial frequency
-    BSP_TIMER_set_frequency_Hz(steppers[id].timer_id, MIN_FREQUENCY);
+    float period_us = 1000000.0f / MIN_FREQUENCY;
+    BSP_TIMER_set_period_us(steppers[id].timer_id, (uint32_t)period_us);
     BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, PULSE_DUTY_CYCLE, false, false);
 
     return true;
 }
 
 #endif // ENDSTOP_ENABLED
+
+bool STEPPER_test_motor(stepper_id_t id)
+{
+    if (!is_valid_motor(id))
+        return false;
+
+    printf("Testing motor %d with simple movement\n", id);
+
+    // Set direction pin directly
+    HAL_GPIO_WritePin(steppers[id].dir_port, steppers[id].dir_pin, GPIO_PIN_SET);
+    HAL_Delay(10);
+
+    // FIXED: Convert frequency to period (2000 Hz = 500 us period)
+    uint32_t period_us = 500; // For 2000 Hz
+
+    // Set the timer period in microseconds
+    BSP_TIMER_set_period_us(steppers[id].timer_id, period_us);
+
+    // Enable PWM with higher duty cycle (80%) for more reliable stepping
+    BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, 80, false, false);
+
+    // Let it run for 2 seconds
+    printf("Motor should be running now\n");
+    HAL_Delay(2000);
+
+    // Stop the motor
+    BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel);
+    printf("Motor should now be stopped\n");
+
+    return true;
+}

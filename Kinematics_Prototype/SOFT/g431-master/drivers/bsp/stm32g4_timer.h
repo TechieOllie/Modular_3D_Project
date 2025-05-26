@@ -54,9 +54,27 @@ void BSP_TIMER_enable_output_trigger(timer_id_t timer_id);
 
 void BSP_TIMER_enable_PWM(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint16_t duty, bool remap, bool negative_channel);
 
+HAL_StatusTypeDef BSP_TIMER_disable_PWM(timer_id_t timer_id, uint32_t channel);
+
 void BSP_TIMER_set_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint16_t duty);
 
 void BSP_TIMER_set_period_with_same_duty(timer_id_t timer_id, uint16_t TIM_CHANNEL_x, uint32_t period);
+
+/**
+ * @brief Set the timer period in microseconds
+ * @param timer_id Timer ID
+ * @param period_us Period in microseconds
+ * @return HAL status
+ */
+HAL_StatusTypeDef BSP_TIMER_set_period_us(timer_id_t timer_id, uint32_t period_us);
+
+/**
+ * @brief Set the timer frequency in Hz
+ * @param timer_id Timer ID
+ * @param frequency_hz Frequency in Hz
+ * @return HAL status
+ */
+HAL_StatusTypeDef BSP_TIMER_set_frequency_Hz(timer_id_t timer_id, float frequency_hz);
 
 #endif /* USE_BSP_TIMER */
 #endif /* BSP_STM32G4_TIMER_H_ */

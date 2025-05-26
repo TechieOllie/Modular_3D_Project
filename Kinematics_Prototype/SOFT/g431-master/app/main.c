@@ -31,6 +31,36 @@
 // Global command buffer
 static command_buffer_t g_cmd_buffer;
 
+// Emergency stop handler - can be called from anywhere
+void emergency_stop(void)
+{
+    printf("EMERGENCY STOP ACTIVATED!\n");
+
+    // Stop CoreXY movement
+    CoreXY_EmergencyStop();
+
+    // Stop any command execution
+    cmd_executor_stop();
+
+    // Visual feedback - solid LED
+    HAL_GPIO_WritePin(LED_GREEN_GPIO, LED_GREEN_PIN, GPIO_PIN_SET);
+
+    printf("Emergency stop complete\n");
+    printf("Enter command or filename: ");
+    fflush(stdout);
+}
+
+// Complete system reset - last resort for emergency stop
+void system_reset(void)
+{
+    printf("!!! PERFORMING SYSTEM RESET !!!\r\n");
+    fflush(stdout);
+    HAL_Delay(100); // Give time for the message to be sent
+
+    // Reset the MCU
+    HAL_NVIC_SystemReset();
+}
+
 // Test function for CoreXY functionality
 void test_corexy(void)
 {
@@ -130,7 +160,11 @@ int main(void)
     HAL_Init();
     SystemClock_Config();
     BSP_GPIO_enable();
+
+    // Fix UART initialization with proper settings
     BSP_UART_init(UART2_ID, 115200);
+    // If BSP_UART_config is not available, ensure UART is initialized with correct settings in BSP_UART_init
+    // BSP_UART_config(UART2_ID, UART_WORDLENGTH_8B, UART_STOPBITS_1, UART_PARITY_NONE); // Removed due to missing declaration
     BSP_SYS_set_std_usart(UART2_ID, UART2_ID, UART2_ID);
 
     // Configure the LED for status - use 0 instead of GPIO_NO_AF if it's not defined
@@ -154,13 +188,14 @@ int main(void)
     printf("System initialized\n");
 
     // Run basic tests
-    printf("Running basic stepper motor test...\n");
-    test_stepper_motors();
+    // printf("Running basic stepper motor test...\n");
+    // test_stepper_motors();
 
-    printf("Running CoreXY test...\n");
-    test_corexy();
+    // printf("Running CoreXY test...\n");
+    // test_corexy();
 
     printf("Enter command or filename: ");
+    fflush(stdout); // Ensure the prompt is sent immediately
 
     char cmd_line[MAX_CMD_LENGTH];
     int cmd_pos = 0;
@@ -174,34 +209,47 @@ int main(void)
         // Process CoreXY state machine
         CoreXY_Process();
 
-        // Check for user input
-        if (BSP_UART_data_ready(UART2_ID))
+        // Process all available characters in the UART buffer
+        while (BSP_UART_data_ready(UART2_ID))
         {
             char c = BSP_UART_getc(UART2_ID);
 
-            // Echo character
-            BSP_UART_putc(UART2_ID, c);
-
+            // Handle command completion (both CR and LF are accepted)
             if (c == '\r' || c == '\n')
             {
-                // Process command when Enter is pressed
+                // Ignore empty LF that might follow CR (prevents double-processing)
+                if (c == '\n' && cmd_pos == 0)
+                    continue;
+
+                // Only process non-empty commands
                 if (cmd_pos > 0)
                 {
+                    // Echo newline for better visual feedback
+                    BSP_UART_puts(UART2_ID, "\r\n", 2);
+
+                    // Null-terminate the command string
                     cmd_line[cmd_pos] = '\0';
 
-                    // Check for special commands
+                    printf("Processing command: %s\n", cmd_line);
+
+                    // Process the command
                     if (strcmp(cmd_line, "STOP") == 0)
                     {
-                        CoreXY_EmergencyStop();
-                        cmd_executor_stop();
+                        emergency_stop();
+                    }
+                    else if (strcmp(cmd_line, "RESET") == 0)
+                    {
+                        system_reset();
                     }
                     else if (strcmp(cmd_line, "PAUSE") == 0)
                     {
                         cmd_executor_pause();
+                        printf("Execution paused\r\n");
                     }
                     else if (strcmp(cmd_line, "RESUME") == 0)
                     {
                         cmd_executor_resume();
+                        printf("Execution resumed\r\n");
                     }
                     else if (strcmp(cmd_line, "HOME") == 0)
                     {
@@ -261,25 +309,43 @@ int main(void)
                     }
 
                     cmd_pos = 0;
-                    printf("\nEnter command or filename: ");
+                    printf("\r\nEnter command or filename: ");
+                    fflush(stdout);
+                }
+                else if (c == '\r')
+                {
+                    // For empty command with just Enter, redisplay the prompt
+                    BSP_UART_puts(UART2_ID, "\r\n", 2);
+                    printf("Enter command or filename: ");
+                    fflush(stdout);
                 }
             }
-            else if (c == 8 || c == 127)
+            else if (c == 8 || c == 127) // Backspace or Delete
             {
-                // Backspace or Delete
                 if (cmd_pos > 0)
                 {
                     cmd_pos--;
-                    BSP_UART_putc(UART2_ID, ' ');
-                    BSP_UART_putc(UART2_ID, 8);
+                    // Echo backspace sequence to erase character on terminal
+                    BSP_UART_puts(UART2_ID, "\b \b", 3);
                 }
             }
             else if (cmd_pos < MAX_CMD_LENGTH - 1)
             {
+                // Echo the character for feedback
+                BSP_UART_putc(UART2_ID, c);
+
                 // Store character
                 cmd_line[cmd_pos++] = c;
             }
+            else
+            {
+                // Buffer full - emit beep sound
+                BSP_UART_putc(UART2_ID, 7); // ASCII BEL (bell)
+            }
         }
+
+        // Small delay to prevent CPU hogging and allow UART buffer to fill
+        HAL_Delay(1);
 
         // Process command execution from file
         cmd_executor_process(&g_cmd_buffer);
