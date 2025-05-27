@@ -1,190 +1,139 @@
 /**
  *******************************************************************************
  * @file    stepper_motor.h
- * @author  Your Name
- * @date    Current Date
- * @brief   Advanced stepper motor control with state machine and timer interrupts
+ * @author  GitHub Copilot
+ * @date    May 27, 2025
+ * @brief   Stepper motor control using TB6600 driver with PWM signals
  *******************************************************************************
  */
 
 #ifndef STEPPER_MOTOR_H_
 #define STEPPER_MOTOR_H_
 
-#include "stm32g4xx_hal.h"
+/* Includes ------------------------------------------------------------------*/
+#include "config.h"
 #include "stm32g4_timer.h"
+#include "stm32g4_gpio.h"
+#include <stdbool.h>
 
-// If using endstops, set to 1
-#define ENDSTOP_ENABLED 0
+/* Defines -------------------------------------------------------------------*/
+#define STEPPER_MAX_MOTORS 4
+#define STEPPER_MICROSTEPS_DEFAULT 8
 
-// Endstop configuration when enabled
-#if ENDSTOP_ENABLED
-// Endstop directions
+// Motor direction
 typedef enum
 {
-    ENDSTOP_MIN = 0, // Min position endstop (home position)
-    ENDSTOP_MAX = 1  // Max position endstop
-} endstop_type_t;
+    MOTOR_DIR_CLOCKWISE = 0,
+    MOTOR_DIR_COUNTERCLOCKWISE = 1
+} stepper_motor_dir_t;
 
-// Endstop trigger logic
-#define ENDSTOP_TRIGGER_HIGH 1 // Endstop triggers on HIGH signal
-#define ENDSTOP_TRIGGER_LOW 0  // Endstop triggers on LOW signal
-#endif
-
-// Maximum number of stepper motors that can be controlled
-#define STEPPER_COUNT 4
-
-// Stepper motor ID type
-typedef int8_t stepper_id_t;
-
-// Movement state machine states
+// Motor states
 typedef enum
 {
-    STEPPER_STATE_IDLE = 0,       // Motor is idle
-    STEPPER_STATE_ACCELERATING,   // Motor is accelerating
-    STEPPER_STATE_CONSTANT_SPEED, // Motor is running at constant speed
-    STEPPER_STATE_DECELERATING,   // Motor is decelerating
-    STEPPER_STATE_HOMING          // Motor is performing homing operation
-} stepper_state_t;
+    MOTOR_STATE_IDLE,
+    MOTOR_STATE_MOVING,
+    MOTOR_STATE_ACCELERATING,
+    MOTOR_STATE_DECELERATING
+} stepper_motor_state_t;
 
-// Movement callback function type
-typedef void (*stepper_callback_t)(stepper_id_t id, bool success);
+// Motor configuration structure
+typedef struct
+{
+    GPIO_TypeDef *pul_gpio; // GPIO port for PUL pin
+    uint16_t pul_pin;       // GPIO pin for PUL
+    GPIO_TypeDef *dir_gpio; // GPIO port for DIR pin
+    uint16_t dir_pin;       // GPIO pin for DIR
+    timer_id_t timer_id;    // Timer ID for PWM generation
+    uint16_t timer_channel; // Timer channel for PWM
 
-/**
- * Initialize the stepper motor module
- */
-void STEPPER_init(void);
+    // Motor parameters
+    uint16_t microsteps;           // Number of microsteps (8, 16, 32)
+    uint32_t step_delay_us;        // Delay between steps in microseconds
+    uint32_t steps_to_move;        // Number of steps to move
+    uint32_t steps_moved;          // Number of steps already moved
+    stepper_motor_dir_t direction; // Current direction
 
-/**
- * Add a stepper motor
- * @param step_port GPIO port for the step pin
- * @param step_pin GPIO pin for the step pin
- * @param dir_port GPIO port for the direction pin
- * @param dir_pin GPIO pin for the direction pin
- * @param timer_id Timer ID for PWM generation
- * @param timer_channel Timer channel for PWM generation
- * @param steps_per_mm Steps per millimeter
- * @param microstepping Microstepping setting (1, 2, 4, 8, 16, etc)
- * @param current_limit_a Current limit in amperes
- * @return Motor ID or -1 if error
- */
-stepper_id_t STEPPER_add(GPIO_TypeDef *step_port, uint16_t step_pin,
-                         GPIO_TypeDef *dir_port, uint16_t dir_pin,
-                         timer_id_t timer_id, uint32_t timer_channel,
-                         float steps_per_mm, uint8_t microstepping, float current_limit_a);
+    // State
+    stepper_motor_state_t state; // Current motor state
+    bool initialized;            // Flag indicating if the motor is initialized
+} stepper_motor_t;
 
-/**
- * Move stepper motor a given number of steps with callback on completion
- * @param id Motor ID
- * @param steps Number of steps (positive=forward, negative=backward)
- * @param speed Speed in steps per second
- * @param callback Function to call when movement completes (can be NULL)
- * @return true if movement started, false if error
- */
-bool STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed, stepper_callback_t callback);
-
-/**
- * Move stepper motor to a position in millimeters with callback on completion
- * @param id Motor ID
- * @param position_mm Target position in millimeters
- * @param speed_mm_s Speed in millimeters per second
- * @param callback Function to call when movement completes (can be NULL)
- * @return true if movement started, false if error
- */
-bool STEPPER_move_to_mm(stepper_id_t id, float position_mm, float speed_mm_s, stepper_callback_t callback);
-
-/**
- * Move stepper motor a given distance in millimeters with callback on completion
- * @param id Motor ID
- * @param distance_mm Distance to move in millimeters
- * @param speed_mm_s Speed in millimeters per second
- * @param callback Function to call when movement completes (can be NULL)
- * @return true if movement started, false if error
- */
-bool STEPPER_move_mm(stepper_id_t id, float distance_mm, float speed_mm_s, stepper_callback_t callback);
-
-/**
- * Stop a stepper motor
- * @param id Motor ID
- */
-void STEPPER_stop(stepper_id_t id);
-
-/**
- * Check if stepper motor is currently moving
- * @param id Motor ID
- * @return true if motor is moving, false otherwise
- */
-bool STEPPER_is_moving(stepper_id_t id);
-
-/**
- * Get the current position of a stepper motor in millimeters
- * @param id Motor ID
- * @return Position in millimeters
- */
-float STEPPER_get_position_mm(stepper_id_t id);
-
-/**
- * Get the steps per mm value for the specified motor
- * @param id Motor ID
- * @return Steps per mm value
- */
-float STEPPER_get_steps_per_mm(stepper_id_t id);
-
-/**
- * Home a stepper motor (move to zero position)
- * @param id Motor ID
- * @param callback Function to call when homing completes (can be NULL)
- * @return true if homing started, false if error
- */
-bool STEPPER_home(stepper_id_t id, stepper_callback_t callback);
-
-/**
- * Process stepper motor state machines - call this in main loop
- * This function will update acceleration profiles and state transitions
- * The actual stepping is handled by timer interrupts
- */
-void STEPPER_process(void);
-
-/**
- * Timer interrupt handlers for each motor
- * These are called by the timer ISRs
- */
+/* Timer interrupt handlers - required by the BSP */
 void TIMER1_user_handler_it(void);
 void TIMER2_user_handler_it(void);
 void TIMER3_user_handler_it(void);
 void TIMER4_user_handler_it(void);
 
-#if ENDSTOP_ENABLED
+/* Public functions declarations ---------------------------------------------*/
 /**
- * Configure endstop for a stepper motor
- * @param id Motor ID
- * @param endstop_type Type of endstop (ENDSTOP_MIN or ENDSTOP_MAX)
- * @param port GPIO port for the endstop pin
- * @param pin GPIO pin for the endstop
- * @param trigger_level Logic level that triggers the endstop (ENDSTOP_TRIGGER_HIGH or ENDSTOP_TRIGGER_LOW)
- * @return HAL_OK if successful, HAL_ERROR otherwise
+ * @brief Initialize a stepper motor with specified parameters
+ *
+ * @param motor_id       ID of the motor to initialize
+ * @param pul_gpio       GPIO port for PUL pin
+ * @param pul_pin        GPIO pin for PUL
+ * @param dir_gpio       GPIO port for DIR pin
+ * @param dir_pin        GPIO pin for DIR
+ * @param timer_id       Timer ID for PWM generation
+ * @param timer_channel  Timer channel for PWM
+ * @param microsteps     Number of microsteps (8, 16, 32)
+ * @return bool          True if initialization successful, false otherwise
  */
-HAL_StatusTypeDef STEPPER_config_endstop(stepper_id_t id, endstop_type_t endstop_type,
-                                         GPIO_TypeDef *port, uint16_t pin, uint8_t trigger_level);
+bool stepper_motor_init(uint8_t motor_id,
+                        GPIO_TypeDef *pul_gpio, uint16_t pul_pin,
+                        GPIO_TypeDef *dir_gpio, uint16_t dir_pin,
+                        timer_id_t timer_id, uint16_t timer_channel,
+                        uint16_t microsteps);
 
 /**
- * Check if an endstop is currently triggered
- * @param id Motor ID
- * @param endstop_type Type of endstop to check
- * @return true if triggered, false otherwise
+ * @brief Start motor movement with specified number of steps, speed, and direction
+ *
+ * @param motor_id       ID of the motor to move
+ * @param steps          Number of steps to move
+ * @param speed_steps_per_second Speed in steps per second
+ * @param direction      Direction of movement (MOTOR_DIR_CLOCKWISE or MOTOR_DIR_COUNTERCLOCKWISE)
+ * @return bool          True if movement started successfully, false otherwise
  */
-bool STEPPER_is_endstop_hit(stepper_id_t id, endstop_type_t endstop_type);
+bool stepper_motor_move(uint8_t motor_id, uint32_t steps, uint32_t speed_steps_per_second,
+                        stepper_motor_dir_t direction);
 
 /**
- * Home a stepper motor using endstop
- * @param id Motor ID
- * @param homing_speed_mm_s Speed for homing in mm/s
- * @param max_travel_mm Maximum travel distance for homing
- * @param callback Function to call when homing completes (can be NULL)
- * @return true if homing started, false if error
+ * @brief Set motor direction
+ *
+ * @param motor_id       ID of the motor
+ * @param direction      Direction (MOTOR_DIR_CLOCKWISE or MOTOR_DIR_COUNTERCLOCKWISE)
+ * @return bool          True if successful, false otherwise
  */
-bool STEPPER_home_with_endstop(stepper_id_t id, float homing_speed_mm_s, float max_travel_mm, stepper_callback_t callback);
-#endif
+bool stepper_motor_set_direction(uint8_t motor_id, stepper_motor_dir_t direction);
 
-bool STEPPER_test_motor(stepper_id_t id);
+/**
+ * @brief Stop a motor
+ *
+ * @param motor_id       ID of the motor to stop
+ * @return bool          True if stop successful, false otherwise
+ */
+bool stepper_motor_stop(uint8_t motor_id);
+
+/**
+ * @brief Get motor state
+ *
+ * @param motor_id       ID of the motor
+ * @return stepper_motor_state_t Current state of the motor
+ */
+stepper_motor_state_t stepper_motor_get_state(uint8_t motor_id);
+
+/**
+ * @brief Update motor state - should be called periodically in main loop
+ */
+void stepper_motor_update(void);
+
+/**
+ * @brief Handler for timer interrupt - must be implemented in application
+ *
+ * @param timer_id Timer ID that triggered the interrupt
+ */
+void stepper_motor_timer_handler(timer_id_t timer_id);
+
+void stepper_motor_manual_step(uint8_t motor_id, uint32_t steps, uint32_t delay_ms);
+void stepper_motor_high_speed_test(uint8_t motor_id, uint32_t steps);
 
 #endif /* STEPPER_MOTOR_H_ */

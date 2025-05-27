@@ -7,7 +7,8 @@
     "string.h": "c",
     "ff.h": "c",
     "diskio.h": "c",
-    "stm32g4_sd.h": "c"
+    "stm32g4_sd.h": "c",
+    "stm32g4_gpio.h": "c"
   },
   "remote.extensionKind": {
     "stmicroelectronics.stm32-vscode-extension": [
