@@ -22,6 +22,7 @@
 #include "corexy.h"
 
 #define BLINK_DELAY 100 // ms
+
 #define MAX_CMD_LENGTH 128
 
 // Motor ID constants
@@ -54,42 +55,61 @@ int main(void)
     BSP_SYS_set_std_usart(UART2_ID, UART2_ID, UART2_ID);
 
     setup_stepper_motors(); // Setup stepper motors
+    printf("Stepper motors initialized.\n");
+
+    stepper_motor_find_max_speed(X_MOTOR_ID);
+
+    stepper_motor_speed_test(X_MOTOR_ID);
+    printf("After speed test - Motor state: %d\n", stepper_motor_get_state(X_MOTOR_ID));
+    while (1)
+        ;
 
     // Try much higher speed - 500 steps per second
-    stepper_motor_move(X_MOTOR_ID, 400, 500, MOTOR_DIR_CLOCKWISE);
-    printf("Stepper motor initialized and moving at 500 steps/sec.\n");
+    // stepper_motor_move(X_MOTOR_ID, 400, 500, MOTOR_DIR_CLOCKWISE);
+    // printf("Stepper motor initialized and moving at 500 steps/sec.\n");
 
     // Main loop
+    static uint32_t last_debug = 0;
     while (1)
     {
+
         stepper_motor_update(); // Update stepper motors
+        HAL_Delay(10);
 
-        // Check if motor has stopped
-        if (stepper_motor_get_state(X_MOTOR_ID) == MOTOR_STATE_IDLE)
-        {
-            // Start next movement in the opposite direction
-            static stepper_motor_dir_t direction = MOTOR_DIR_CLOCKWISE;
-            static uint32_t speed = 500; // Start at 500 steps/sec
-
-            // Toggle direction
-            direction = (direction == MOTOR_DIR_CLOCKWISE) ? MOTOR_DIR_COUNTERCLOCKWISE : MOTOR_DIR_CLOCKWISE;
-
-            // Gradually increase speed to test maximum
-            speed += 100;
-            if (speed > 2000)
-                speed = 500; // Reset after reaching 2000 steps/sec
-
-            printf("Moving at %lu steps/sec in %s direction\n",
-                   speed, (direction == MOTOR_DIR_CLOCKWISE) ? "clockwise" : "counterclockwise");
-
-            // Move 400 steps in new direction
-            stepper_motor_move(X_MOTOR_ID, 400, speed, direction);
-
-            // Optional delay between movements
-            HAL_Delay(500);
+        static uint32_t last_debug = 0;
+        if (HAL_GetTick() - last_debug > 1000)
+        { // Once per second
+            last_debug = HAL_GetTick();
+            printf("Motor state: %d\n",
+                   stepper_motor_get_state(X_MOTOR_ID));
         }
 
+        // // Check if motor has stopped
+        // if (stepper_motor_get_state(X_MOTOR_ID) == MOTOR_STATE_IDLE)
+        // {
+        //     // Start next movement in the opposite direction
+        //     static stepper_motor_dir_t direction = MOTOR_DIR_CLOCKWISE;
+        //     static uint32_t speed = 500; // Start at 500 steps/sec
+
+        //     // Toggle direction
+        //     direction = (direction == MOTOR_DIR_CLOCKWISE) ? MOTOR_DIR_COUNTERCLOCKWISE : MOTOR_DIR_CLOCKWISE;
+
+        //     // Gradually increase speed to test maximum
+        //     speed += 100;
+        //     if (speed > 2000)
+        //         speed = 500; // Reset after reaching 2000 steps/sec
+
+        //     printf("Moving at %lu steps/sec in %s direction\n",
+        //            speed, (direction == MOTOR_DIR_CLOCKWISE) ? "clockwise" : "counterclockwise");
+
+        //     // Move 400 steps in new direction
+        //     stepper_motor_move(X_MOTOR_ID, 400, speed, direction);
+
+        //     // Optional delay between movements
+        //     HAL_Delay(500);
+        // }
+
         // Small delay in the loop
-        HAL_Delay(10);
+        // HAL_Delay(10);
     }
 }

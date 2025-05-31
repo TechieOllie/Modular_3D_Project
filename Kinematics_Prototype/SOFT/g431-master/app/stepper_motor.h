@@ -36,6 +36,25 @@ typedef enum
     MOTOR_STATE_DECELERATING
 } stepper_motor_state_t;
 
+typedef enum
+{
+    ACCEL_PHASE_NONE,
+    ACCEL_PHASE_ACCELERATING,
+    ACCEL_PHASE_CONSTANT,
+    ACCEL_PHASE_DECELERATING
+} accel_phase_t;
+
+typedef struct
+{
+    uint32_t start_speed;
+    uint32_t max_speed;
+    uint32_t accel_steps;
+    uint32_t decel_steps;
+    uint32_t current_speed;
+    accel_phase_t phase;
+    uint32_t speed_update_interval; // Controls how often speed is updated during accel/decel
+} accel_state_t;
+
 // Motor configuration structure
 typedef struct
 {
@@ -56,6 +75,9 @@ typedef struct
     // State
     stepper_motor_state_t state; // Current motor state
     bool initialized;            // Flag indicating if the motor is initialized
+
+    // Acceleration support
+    accel_state_t accel_state;
 } stepper_motor_t;
 
 /* Timer interrupt handlers - required by the BSP */
@@ -96,6 +118,10 @@ bool stepper_motor_init(uint8_t motor_id,
 bool stepper_motor_move(uint8_t motor_id, uint32_t steps, uint32_t speed_steps_per_second,
                         stepper_motor_dir_t direction);
 
+bool stepper_motor_move_with_accel(uint8_t motor_id, uint32_t steps,
+                                   uint32_t start_speed, uint32_t max_speed,
+                                   uint32_t accel_steps, stepper_motor_dir_t direction);
+
 /**
  * @brief Set motor direction
  *
@@ -134,6 +160,9 @@ void stepper_motor_update(void);
 void stepper_motor_timer_handler(timer_id_t timer_id);
 
 void stepper_motor_manual_step(uint8_t motor_id, uint32_t steps, uint32_t delay_ms);
-void stepper_motor_high_speed_test(uint8_t motor_id, uint32_t steps);
+
+void stepper_motor_speed_test(uint8_t motor_id);
+
+void stepper_motor_find_max_speed(uint8_t motor_id);
 
 #endif /* STEPPER_MOTOR_H_ */
