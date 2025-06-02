@@ -33,10 +33,10 @@ void setup_stepper_motors(void)
 {
     // Initialize motors
     // X-axis motor using Timer2, Channel 1 on pin PA0 with 8 microsteps
-    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10, TIMER1_ID, TIM_CHANNEL_2, 8);
+    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10, TIMER1_ID, TIM_CHANNEL_2, 16);
 
     // Y-axis motor using Timer3, Channel 1 on pin PA6 with 8 microsteps
-    // stepper_motor_init(Y_MOTOR_ID, GPIOA, GPIO_PIN_6, TIMER3_ID, TIM_CHANNEL_1, 8);
+    stepper_motor_init(Y_MOTOR_ID, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, TIMER3_ID, TIM_CHANNEL_1, 16);
 
     // Move X-axis motor 200 steps at 100 steps/second
     // stepper_motor_move(X_MOTOR_ID, 200, 100);
@@ -56,22 +56,18 @@ int main(void)
 
     setup_stepper_motors(); // Setup stepper motors
     printf("Stepper motors initialized.\n");
-
+    printf("X Motor move 1000 steps\n");
+    stepper_motor_move(X_MOTOR_ID, 10000, 8000, MOTOR_DIR_COUNTERCLOCKWISE);
+    printf("Y Motor move 1000 steps\n");
+    stepper_motor_move(Y_MOTOR_ID, 10000, 8000, MOTOR_DIR_COUNTERCLOCKWISE);
     // Run the speed test
-    stepper_motor_speed_test(X_MOTOR_ID);
-    printf("After speed test - Motor state: %d\n", stepper_motor_get_state(X_MOTOR_ID));
+    // stepper_motor_speed_test(X_MOTOR_ID);
+    // printf("After speed test - Motor state: %d\n", stepper_motor_get_state(X_MOTOR_ID));
 
     // Main loop
     while (1)
     {
         stepper_motor_update(); // Update stepper motors
         HAL_Delay(10);
-
-        static uint32_t last_debug = 0;
-        if (HAL_GetTick() - last_debug > 1000) // Once per second
-        {
-            last_debug = HAL_GetTick();
-            printf("Motor state: %d\n", stepper_motor_get_state(X_MOTOR_ID));
-        }
     }
 }

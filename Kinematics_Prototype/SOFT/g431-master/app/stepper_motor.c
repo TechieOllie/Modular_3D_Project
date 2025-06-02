@@ -64,7 +64,18 @@ bool stepper_motor_init(uint8_t motor_id,
 
     // Configure PUL GPIO pin
     // For TIM1_CH2 on PA9
-    BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF4_TIM1);
+    switch (timer_id)
+    {
+    case TIMER1_ID:
+        BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF4_TIM1);
+        break;
+    case TIMER2_ID:
+        BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF1_TIM2);
+        break;
+    case TIMER3_ID:
+        BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF2_TIM3);
+        break;
+    }
 
     // Configure DIR GPIO pin
     BSP_GPIO_pin_config(dir_gpio, dir_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
@@ -357,12 +368,12 @@ static void set_direction_pin(stepper_motor_t *motor, stepper_motor_dir_t direct
     if (direction == MOTOR_DIR_CLOCKWISE)
     {
         // Set DIR pin low for clockwise direction (based on TB6600 documentation)
-        HAL_GPIO_WritePin(motor->dir_gpio, motor->dir_pin, 0);
+        HAL_GPIO_WritePin(motor->dir_gpio, motor->dir_pin, 1);
     }
     else
     {
         // Set DIR pin high for counterclockwise direction
-        HAL_GPIO_WritePin(motor->dir_gpio, motor->dir_pin, 1);
+        HAL_GPIO_WritePin(motor->dir_gpio, motor->dir_pin, 0);
     }
 }
 

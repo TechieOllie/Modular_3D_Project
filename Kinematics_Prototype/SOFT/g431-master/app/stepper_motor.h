@@ -17,8 +17,8 @@
 #include <stdbool.h>
 
 /* Defines -------------------------------------------------------------------*/
-#define STEPPER_MAX_MOTORS 4
-#define STEPPER_MICROSTEPS_DEFAULT 8
+#define STEPPER_MAX_MOTORS 3
+#define STEPPER_MICROSTEPS_DEFAULT 16
 
 // Motor direction
 typedef enum
