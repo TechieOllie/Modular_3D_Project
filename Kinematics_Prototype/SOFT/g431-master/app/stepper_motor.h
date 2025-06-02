@@ -36,37 +36,18 @@ typedef enum
     MOTOR_STATE_DECELERATING
 } stepper_motor_state_t;
 
-typedef enum
-{
-    ACCEL_PHASE_NONE,
-    ACCEL_PHASE_ACCELERATING,
-    ACCEL_PHASE_CONSTANT,
-    ACCEL_PHASE_DECELERATING
-} accel_phase_t;
-
-typedef struct
-{
-    uint32_t start_speed;
-    uint32_t max_speed;
-    uint32_t accel_steps;
-    uint32_t decel_steps;
-    uint32_t current_speed;
-    accel_phase_t phase;
-    uint32_t speed_update_interval; // Controls how often speed is updated during accel/decel
-} accel_state_t;
-
 // Motor configuration structure
 typedef struct
 {
     GPIO_TypeDef *pul_gpio; // GPIO port for PUL pin
-    uint16_t pul_pin;       // GPIO pin for PUL
+    uint32_t pul_pin;       // GPIO pin for PUL
     GPIO_TypeDef *dir_gpio; // GPIO port for DIR pin
-    uint16_t dir_pin;       // GPIO pin for DIR
+    uint32_t dir_pin;       // GPIO pin for DIR
     timer_id_t timer_id;    // Timer ID for PWM generation
-    uint16_t timer_channel; // Timer channel for PWM
+    uint32_t timer_channel; // Timer channel for PWM
 
     // Motor parameters
-    uint16_t microsteps;           // Number of microsteps (8, 16, 32)
+    uint8_t microsteps;            // Number of microsteps (8, 16, 32)
     uint32_t step_delay_us;        // Delay between steps in microseconds
     uint32_t steps_to_move;        // Number of steps to move
     uint32_t steps_moved;          // Number of steps already moved
@@ -76,8 +57,8 @@ typedef struct
     stepper_motor_state_t state; // Current motor state
     bool initialized;            // Flag indicating if the motor is initialized
 
-    // Acceleration support
-    accel_state_t accel_state;
+    // Remove the acceleration state field:
+    // accel_state_t accel_state;
 } stepper_motor_t;
 
 /* Timer interrupt handlers - required by the BSP */
