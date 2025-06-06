@@ -56,18 +56,24 @@ int main(void)
 
     setup_stepper_motors(); // Setup stepper motors
     printf("Stepper motors initialized.\n");
-    printf("X Motor move 1000 steps\n");
-    stepper_motor_move(X_MOTOR_ID, 10000, 8000, MOTOR_DIR_COUNTERCLOCKWISE);
-    printf("Y Motor move 1000 steps\n");
-    stepper_motor_move(Y_MOTOR_ID, 10000, 8000, MOTOR_DIR_COUNTERCLOCKWISE);
-    // Run the speed test
-    // stepper_motor_speed_test(X_MOTOR_ID);
-    // printf("After speed test - Motor state: %d\n", stepper_motor_get_state(X_MOTOR_ID));
+
+    // Run the speed test on X motor first
+    printf("\n============ TESTING X MOTOR ============\n");
+    stepper_motor_speed_test(X_MOTOR_ID);
+    printf("X motor test complete, state: %d (0=IDLE)\n", stepper_motor_get_state(X_MOTOR_ID));
+    HAL_Delay(1000); // Allow system to settle
+
+    // Then test Y motor
+    printf("\n============ TESTING Y MOTOR ============\n");
+    stepper_motor_speed_test(Y_MOTOR_ID);
+    printf("Y motor test complete, state: %d (0=IDLE)\n", stepper_motor_get_state(Y_MOTOR_ID));
+
+    printf("\nAll tests complete!\n");
 
     // Main loop
     while (1)
     {
-        stepper_motor_update(); // Update stepper motors
-        HAL_Delay(10);
+        stepper_motor_update();
+        HAL_Delay(10); // Delay to allow motor updates
     }
 }

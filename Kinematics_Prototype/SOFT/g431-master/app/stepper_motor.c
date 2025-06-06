@@ -274,16 +274,18 @@ void stepper_motor_speed_test(uint8_t motor_id)
 {
     uint32_t test_speeds[] = {1000, 2000, 5000, 8000};
     uint8_t num_speeds = sizeof(test_speeds) / sizeof(test_speeds[0]);
+    uint32_t last_print = 0; // Move from static to regular variable
 
-    printf("Starting speed test sequence...\n");
+    printf("Starting speed test sequence for motor %d...\n", motor_id);
 
     for (uint8_t i = 0; i < num_speeds; i++)
     {
         uint32_t speed = test_speeds[i];
-        printf("Testing speed: %lu Hz for 1000 steps\n", speed);
+        printf("Testing motor %d at speed: %lu Hz for 1000 steps\n", motor_id, speed);
 
         // Reset motor state before starting new test
         stepper_motor_reset(motor_id);
+        HAL_Delay(100); // Brief delay after reset
 
         // Use regular move function
         stepper_motor_move(motor_id, 1000, speed, MOTOR_DIR_CLOCKWISE);
@@ -291,18 +293,19 @@ void stepper_motor_speed_test(uint8_t motor_id)
         // Wait until motor stops
         uint32_t start_time = HAL_GetTick();
         uint32_t timeout = 5000 + (1000 * 1000 / speed); // More time for slower speeds
+        last_print = 0;                                  // Reset print timer for this test
 
         while (stepper_motor_get_state(motor_id) != MOTOR_STATE_IDLE)
         {
             stepper_motor_update();
 
             // Print progress periodically
-            static uint32_t last_print = 0;
             uint32_t now = HAL_GetTick();
             if (now - last_print >= 500) // Every 500ms
             {
                 last_print = now;
-                printf("Progress: %lu/%lu steps\n",
+                printf("Motor %d progress: %lu/%lu steps\n",
+                       motor_id,
                        motors[motor_id].steps_moved,
                        motors[motor_id].steps_to_move);
             }
@@ -310,7 +313,7 @@ void stepper_motor_speed_test(uint8_t motor_id)
             // Check for timeout
             if (HAL_GetTick() - start_time > timeout)
             {
-                printf("Timeout waiting for motor to stop! Forcing stop.\n");
+                printf("Timeout waiting for motor %d to stop! Forcing stop.\n", motor_id);
                 stepper_motor_stop(motor_id);
                 break;
             }
@@ -319,11 +322,11 @@ void stepper_motor_speed_test(uint8_t motor_id)
         }
 
         // Wait between tests
-        printf("Completed %lu Hz test. Waiting 2 seconds...\n", speed);
+        printf("Completed %lu Hz test for motor %d. Waiting 2 seconds...\n", speed, motor_id);
         HAL_Delay(2000);
     }
 
-    printf("Speed test complete!\n");
+    printf("Speed test complete for motor %d!\n", motor_id);
 }
 
 /**
@@ -415,18 +418,32 @@ static void configure_pwm_timer(stepper_motor_t *motor, uint32_t frequency_hz)
  */
 static void timer_interrupt_handler(timer_id_t timer_id)
 {
-    static uint32_t counter = 0;
-    static uint32_t last_tick = 0;
+    static uint32_t counter[4] = {0};   // Separate counter for each timer
+    static uint32_t last_tick[4] = {0}; // Separate last tick for each timer
     uint32_t current_tick = HAL_GetTick();
 
-    counter++;
+    // Use array index based on timer ID
+    uint8_t timer_idx = timer_id;
+    if (timer_idx >= 4)
+        timer_idx = 0; // Safety check
+
+    counter[timer_idx]++;
 
     // Debug output at reasonable intervals
-    if (current_tick - last_tick >= 1000)
+    if (current_tick - last_tick[timer_idx] >= 1000)
     {
-        last_tick = current_tick;
-        printf("Timer %d: counter=%lu, steps moved for motor 0: %lu\n",
-               timer_id, counter, motors[0].steps_moved);
+        last_tick[timer_idx] = current_tick;
+        printf("Timer %d: counter=%lu\n",
+               timer_id, counter[timer_idx]);
+
+        // Only print steps for motors using this timer
+        for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
+        {
+            if (motors[i].initialized && motors[i].timer_id == timer_id)
+            {
+                printf("  Motor %d: %lu steps moved\n", i, motors[i].steps_moved);
+            }
+        }
     }
 
     // Find which motor is using this timer
