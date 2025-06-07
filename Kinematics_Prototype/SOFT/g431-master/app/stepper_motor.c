@@ -9,6 +9,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stepper_motor.h"
+#include "limit_switches.h"
 #include "stm32g4_timer.h"
 #include "stm32g4_gpio.h"
 #include <stdio.h>
@@ -22,6 +23,7 @@ static uint8_t motor_count = 0;
 static void configure_pwm_timer(stepper_motor_t *motor, uint32_t frequency_hz);
 static void timer_interrupt_handler(timer_id_t timer_id);
 static void set_direction_pin(stepper_motor_t *motor, stepper_motor_dir_t direction);
+static bool check_motor_limits_before_move(uint8_t motor_id, stepper_motor_dir_t direction);
 bool stepper_motor_reset(uint8_t motor_id);
 
 /* Public functions implementations ------------------------------------------*/
@@ -62,6 +64,10 @@ bool stepper_motor_init(uint8_t motor_id,
     motor->steps_moved = 0;
     motor->direction = MOTOR_DIR_CLOCKWISE;
 
+    // Initialize safety features
+    motor->limit_check_enabled = false;
+    motor->associated_axis = 255; // No axis associated by default
+
     // Configure PUL GPIO pin with appropriate alternate function based on timer
     uint32_t gpio_af;
     switch (timer_id)
@@ -89,7 +95,9 @@ bool stepper_motor_init(uint8_t motor_id,
     BSP_GPIO_pin_config(dir_gpio, dir_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
 
     // Initialize DIR pin to clockwise direction (low)
-    set_direction_pin(motor, MOTOR_DIR_CLOCKWISE); // Set the motor as initialized
+    set_direction_pin(motor, MOTOR_DIR_CLOCKWISE);
+
+    // Set the motor as initialized
     motor->initialized = true;
     motor_count++;
 
@@ -102,6 +110,43 @@ bool stepper_motor_init(uint8_t motor_id,
                                                                : "GPIOC",
            dir_pin,
            timer_id, timer_channel);
+
+    return true;
+}
+
+/**
+ * @brief Associate a motor with an axis for limit switch checking
+ */
+bool stepper_motor_set_axis(uint8_t motor_id, uint8_t axis_id)
+{
+    if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    motors[motor_id].associated_axis = axis_id;
+
+    printf("Motor %d associated with axis %s\n", motor_id,
+           (axis_id == 0) ? "X" : (axis_id == 1) ? "Y"
+                              : (axis_id == 2)   ? "Z"
+                                                 : "NONE");
+
+    return true;
+}
+
+/**
+ * @brief Enable/disable limit switch checking for a motor
+ */
+bool stepper_motor_enable_limit_check(uint8_t motor_id, bool enable)
+{
+    if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    motors[motor_id].limit_check_enabled = enable;
+
+    printf("Motor %d limit checking %s\n", motor_id, enable ? "enabled" : "disabled");
 
     return true;
 }
@@ -154,11 +199,43 @@ bool stepper_motor_move(uint8_t motor_id, uint32_t steps, uint32_t speed_steps_p
 }
 
 /**
- * @brief Set motor direction
+ * @brief Start motor movement with limit switch checking
  */
-bool stepper_motor_set_direction(uint8_t motor_id, stepper_motor_dir_t direction)
+bool stepper_motor_move_with_limits(uint8_t motor_id, uint32_t steps,
+                                    uint32_t speed_steps_per_second,
+                                    stepper_motor_dir_t direction)
 {
-    // Check if motor_id is valid
+    if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
+    {
+        printf("ERROR: Motor %d is not valid or not initialized!\n", motor_id);
+        return false;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    // Check limits before starting movement
+    if (motor->limit_check_enabled && !check_motor_limits_before_move(motor_id, direction))
+    {
+        printf("ERROR: Cannot move motor %d - limit switch already triggered!\n", motor_id);
+        return false;
+    }
+
+    // If steps is 0, move until limit is hit (used for homing)
+    if (steps == 0)
+    {
+        steps = 0xFFFFFFFF; // Very large number
+        printf("Motor %d: Moving until limit switch in direction %d\n", motor_id, direction);
+    }
+
+    // Start normal movement
+    return stepper_motor_move(motor_id, steps, speed_steps_per_second, direction);
+}
+
+/**
+ * @brief Home a motor by moving towards minimum limit switch
+ */
+bool stepper_motor_home(uint8_t motor_id, uint32_t speed_steps_per_second)
+{
     if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
     {
         return false;
@@ -166,11 +243,18 @@ bool stepper_motor_set_direction(uint8_t motor_id, stepper_motor_dir_t direction
 
     stepper_motor_t *motor = &motors[motor_id];
 
-    // Set the direction pin
-    set_direction_pin(motor, direction);
-    motor->direction = direction;
+    if (!motor->limit_check_enabled || motor->associated_axis == 255)
+    {
+        printf("ERROR: Motor %d cannot home - no axis or limits configured\n", motor_id);
+        return false;
+    }
 
-    return true;
+    printf("Homing motor %d (axis %d) at %lu Hz...\n",
+           motor_id, motor->associated_axis, speed_steps_per_second);
+
+    // Move towards minimum limit (usually counterclockwise for homing)
+    return stepper_motor_move_with_limits(motor_id, 0, speed_steps_per_second,
+                                          MOTOR_DIR_COUNTERCLOCKWISE);
 }
 
 /**
@@ -235,6 +319,20 @@ void stepper_motor_update(void)
         if (!motor->initialized || motor->state != MOTOR_STATE_MOVING)
         {
             continue;
+        }
+
+        // Check limit switches if enabled
+        if (motor->limit_check_enabled && motor->associated_axis != 255)
+        {
+            axis_t axis = (axis_t)motor->associated_axis;
+
+            // Check if any limit on this axis is triggered
+            if (limit_switch_axis_triggered(axis))
+            {
+                printf("Limit triggered during movement - stopping motor %d\n", i);
+                stepper_motor_stop(i);
+                continue;
+            }
         }
 
         // Check if we've completed all steps
@@ -452,56 +550,147 @@ static void configure_pwm_timer(stepper_motor_t *motor, uint32_t frequency_hz)
 }
 
 /**
- * @brief Timer interrupt handler
- *
- * @param timer_id Timer ID that triggered the interrupt
+ * @brief Configure timer for step counting (not PWM)
+ */
+static void configure_step_timer(stepper_motor_t *motor, uint32_t frequency_hz)
+{
+    // Calculate period for the timer based on frequency
+    uint32_t period_us = 1000000 / frequency_hz;
+
+    printf("Configuring timer %d for stepping at %lu Hz\n", motor->timer_id, frequency_hz);
+
+    // Stop the timer if it was running
+    BSP_TIMER_stop(motor->timer_id);
+
+    // Configure timer for interrupt-based stepping (not PWM)
+    BSP_TIMER_run_us(motor->timer_id, period_us, true);
+
+    // Use PWM with very low duty cycle to generate interrupts
+    BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, 10, false, false);
+}
+
+/**
+ * @brief Improved timer interrupt handler for step generation
  */
 static void timer_interrupt_handler(timer_id_t timer_id)
 {
-    static uint32_t counter[4] = {0};   // Separate counter for each timer
-    static uint32_t last_tick[4] = {0}; // Separate last tick for each timer
-    uint32_t current_tick = HAL_GetTick();
-
-    counter++; // Debug output at reasonable intervals
-    if (current_tick - last_tick >= 1000)
-    {
-        last_tick = current_tick;
-        // Find which motor is currently moving for debug output
-        for (uint8_t j = 0; j < STEPPER_MAX_MOTORS; j++)
-        {
-            if (motors[j].initialized && motors[j].state == MOTOR_STATE_MOVING && motors[j].timer_id == timer_id)
-            {
-                printf("Timer %d: counter=%lu, steps moved for motor %d: %lu\n",
-                       timer_id, counter, j, motors[j].steps_moved);
-                break;
-            }
-        }
-    }
-
     // Find which motor is using this timer
     for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
     {
         stepper_motor_t *motor = &motors[i];
 
-        if (!motor->initialized || motor->state != MOTOR_STATE_MOVING)
+        if (!motor->initialized || motor->state != MOTOR_STATE_MOVING || motor->timer_id != timer_id)
         {
             continue;
         }
 
-        if (motor->timer_id == timer_id)
-        {
-            // Increment steps moved counter
-            motor->steps_moved++;
+        // Generate step pulse manually
+        HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_SET);
 
-            // If we've reached the target, stop the motor
-            if (motor->steps_moved >= motor->steps_to_move)
-            {
-                printf("Target reached: %lu/%lu steps\n", motor->steps_moved, motor->steps_to_move);
-                stepper_motor_stop(i);
-            }
-            break;
+        // Short delay for pulse width (TB6600 needs minimum 2.5µs)
+        // Use a simple loop or hardware timer for precise timing
+        for (volatile int j = 0; j < 10; j++)
+        { /* ~1µs delay */
+        }
+
+        HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_RESET);
+
+        // Increment steps counter
+        motor->steps_moved++;
+
+        // Check if movement is complete
+        if (motor->steps_moved >= motor->steps_to_move)
+        {
+            // Stop this motor
+            BSP_TIMER_stop(motor->timer_id);
+            motor->state = MOTOR_STATE_IDLE;
+
+            printf("Motor %d completed: %lu steps\n", i, motor->steps_moved);
+        }
+
+        break; // Only one motor per timer
+    }
+}
+
+/**
+ * @brief Non-blocking motor move function
+ */
+bool stepper_motor_move_non_blocking(uint8_t motor_id, uint32_t steps,
+                                     uint32_t speed_steps_per_second,
+                                     stepper_motor_dir_t direction)
+{
+    if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    // Stop any current movement
+    // Stop any current movement
+    if (motor->state == MOTOR_STATE_MOVING)
+    {
+        BSP_TIMER_stop(motor->timer_id);
+    }
+    // Configure step pin as regular output (not PWM)
+    BSP_GPIO_pin_config(motor->pul_gpio, motor->pul_pin, GPIO_MODE_OUTPUT_PP,
+                        GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_NO_AF);
+
+    // Set initial pulse state to LOW
+    HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_RESET);
+
+    // Setup movement parameters
+    motor->steps_to_move = steps;
+    motor->steps_moved = 0;
+    motor->direction = direction;
+    motor->state = MOTOR_STATE_MOVING;
+
+    // Set direction
+    set_direction_pin(motor, direction);
+
+    // Configure and start timer for step generation
+    configure_step_timer(motor, speed_steps_per_second);
+
+    printf("Started non-blocking movement: Motor %d, %lu steps at %lu Hz\n",
+           motor_id, steps, speed_steps_per_second);
+
+    return true;
+}
+
+/**
+ * @brief Move multiple motors simultaneously
+ */
+bool stepper_motor_move_synchronized(uint8_t num_motors, uint8_t *motor_ids,
+                                     uint32_t *steps, uint32_t *speeds,
+                                     stepper_motor_dir_t *directions)
+{
+    // Start all motors
+    for (uint8_t i = 0; i < num_motors; i++)
+    {
+        if (!stepper_motor_move_non_blocking(motor_ids[i], steps[i], speeds[i], directions[i]))
+        {
+            printf("Failed to start motor %d\n", motor_ids[i]);
+            return false;
         }
     }
+
+    printf("Started synchronized movement of %d motors\n", num_motors);
+    return true;
+}
+
+/**
+ * @brief Check if all specified motors have completed their movements
+ */
+bool stepper_motors_all_idle(uint8_t num_motors, uint8_t *motor_ids)
+{
+    for (uint8_t i = 0; i < num_motors; i++)
+    {
+        if (stepper_motor_get_state(motor_ids[i]) != MOTOR_STATE_IDLE)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 /**
@@ -645,4 +834,41 @@ void stepper_motor_simple_speed_test(uint8_t motor_id)
     }
 
     printf("Simple speed test complete!\n");
+}
+
+/**
+ * @brief Check if motor can move in specified direction without hitting limits
+ */
+static bool check_motor_limits_before_move(uint8_t motor_id, stepper_motor_dir_t direction)
+{
+    stepper_motor_t *motor = &motors[motor_id];
+
+    if (!motor->limit_check_enabled || motor->associated_axis == 255)
+    {
+        return true; // No limits to check
+    }
+
+    axis_t axis = (axis_t)motor->associated_axis;
+
+    // Check appropriate limit based on direction
+    if (direction == MOTOR_DIR_COUNTERCLOCKWISE)
+    {
+        // Moving towards minimum - check MIN limit
+        if (limit_switch_read(axis, LIMIT_MIN) == LIMIT_TRIGGERED)
+        {
+            printf("Cannot move motor %d: MIN limit already triggered\n", motor_id);
+            return false;
+        }
+    }
+    else
+    {
+        // Moving towards maximum - check MAX limit
+        if (limit_switch_read(axis, LIMIT_MAX) == LIMIT_TRIGGERED)
+        {
+            printf("Cannot move motor %d: MAX limit already triggered\n", motor_id);
+            return false;
+        }
+    }
+
+    return true;
 }
