@@ -30,13 +30,12 @@
 #define Y_MOTOR_ID 1
 
 void setup_stepper_motors(void)
-{
-    // Initialize motors
-    // X-axis motor using Timer2, Channel 1 on pin PA0 with 8 microsteps
-    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10, TIMER1_ID, TIM_CHANNEL_2, 16);
+{ // Initialize motors
+    // X-axis motor using Timer1, Channel 2 on pins PA9(PUL), PA10(DIR) with 8 microsteps
+    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10, TIMER1_ID, TIM_CHANNEL_2, 8);
 
-    // Y-axis motor using Timer3, Channel 1 on pin PA6 with 8 microsteps
-    stepper_motor_init(Y_MOTOR_ID, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, TIMER3_ID, TIM_CHANNEL_1, 16);
+    // Y-axis motor using Timer3, Channel 1 on pins PB4(PUL), PB5(DIR) with 8 microsteps
+    stepper_motor_init(Y_MOTOR_ID, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, TIMER3_ID, TIM_CHANNEL_1, 8);
 
     // Move X-axis motor 200 steps at 100 steps/second
     // stepper_motor_move(X_MOTOR_ID, 200, 100);
@@ -53,15 +52,21 @@ int main(void)
 
     BSP_UART_init(UART2_ID, 115200);
     BSP_SYS_set_std_usart(UART2_ID, UART2_ID, UART2_ID);
-
     setup_stepper_motors(); // Setup stepper motors
-    printf("Stepper motors initialized.\n");
+    printf("Both stepper motors initialized.\n");
 
-    // Run the speed test on X motor first
-    printf("\n============ TESTING X MOTOR ============\n");
+    // Test X-axis motor first
+    printf("Testing X-axis motor (Motor ID 0)...\n");
+    stepper_motor_speed_test(Y_MOTOR_ID);
+    printf("X-axis motor test complete. Motor state: %d\n", stepper_motor_get_state(X_MOTOR_ID));
+
+    // Wait a bit between tests
+    HAL_Delay(3000);
+
+    // Test Y-axis motor
+    printf("Testing Y-axis motor (Motor ID 1)...\n");
     stepper_motor_speed_test(X_MOTOR_ID);
-    printf("X motor test complete, state: %d (0=IDLE)\n", stepper_motor_get_state(X_MOTOR_ID));
-    HAL_Delay(1000); // Allow system to settle
+    printf("Y-axis motor test complete. Motor state: %d\n", stepper_motor_get_state(Y_MOTOR_ID));
 
     // Then test Y motor
     printf("\n============ TESTING Y MOTOR ============\n");
@@ -73,7 +78,16 @@ int main(void)
     // Main loop
     while (1)
     {
-        stepper_motor_update();
-        HAL_Delay(10); // Delay to allow motor updates
+        stepper_motor_update(); // Update stepper motors
+        HAL_Delay(10);
+
+        static uint32_t last_debug = 0;
+        if (HAL_GetTick() - last_debug > 5000) // Every 5 seconds
+        {
+            last_debug = HAL_GetTick();
+            printf("X-axis state: %d, Y-axis state: %d\n",
+                   stepper_motor_get_state(X_MOTOR_ID),
+                   stepper_motor_get_state(Y_MOTOR_ID));
+        }
     }
 }

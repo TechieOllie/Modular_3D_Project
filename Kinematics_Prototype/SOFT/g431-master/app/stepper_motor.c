@@ -62,30 +62,46 @@ bool stepper_motor_init(uint8_t motor_id,
     motor->steps_moved = 0;
     motor->direction = MOTOR_DIR_CLOCKWISE;
 
-    // Configure PUL GPIO pin
-    // For TIM1_CH2 on PA9
+    // Configure PUL GPIO pin with appropriate alternate function based on timer
+    uint32_t gpio_af;
     switch (timer_id)
     {
     case TIMER1_ID:
-        BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF4_TIM1);
+        gpio_af = GPIO_AF4_TIM1;
         break;
     case TIMER2_ID:
-        BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF1_TIM2);
+        gpio_af = GPIO_AF1_TIM2;
         break;
     case TIMER3_ID:
-        BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, GPIO_AF2_TIM3);
+        gpio_af = GPIO_AF2_TIM3;
+        break;
+    case TIMER4_ID:
+        gpio_af = GPIO_AF2_TIM4;
+        break;
+    default:
+        gpio_af = GPIO_AF4_TIM1; // Default fallback
         break;
     }
+
+    BSP_GPIO_pin_config(pul_gpio, pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_VERY_HIGH, gpio_af);
 
     // Configure DIR GPIO pin
     BSP_GPIO_pin_config(dir_gpio, dir_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
 
     // Initialize DIR pin to clockwise direction (low)
-    set_direction_pin(motor, MOTOR_DIR_CLOCKWISE);
-
-    // Set the motor as initialized
+    set_direction_pin(motor, MOTOR_DIR_CLOCKWISE); // Set the motor as initialized
     motor->initialized = true;
     motor_count++;
+
+    printf("Motor %d initialized: PUL=%s Pin_%d, DIR=%s Pin_%d, Timer=%d, Channel=%d\n",
+           motor_id,
+           (pul_gpio == GPIOA) ? "GPIOA" : (pul_gpio == GPIOB) ? "GPIOB"
+                                                               : "GPIOC",
+           pul_pin,
+           (dir_gpio == GPIOA) ? "GPIOA" : (dir_gpio == GPIOB) ? "GPIOB"
+                                                               : "GPIOC",
+           dir_pin,
+           timer_id, timer_channel);
 
     return true;
 }
@@ -99,10 +115,14 @@ bool stepper_motor_move(uint8_t motor_id, uint32_t steps, uint32_t speed_steps_p
     // Check if motor_id is valid
     if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
     {
+        printf("ERROR: Motor %d is not valid or not initialized!\n", motor_id);
         return false;
     }
 
     stepper_motor_t *motor = &motors[motor_id];
+
+    printf("Motor %d move requested: %lu steps at %lu Hz, direction=%d\n",
+           motor_id, steps, speed_steps_per_second, direction);
 
     // Explicitly stop any previous movement
     if (motor->state != MOTOR_STATE_IDLE)
@@ -259,12 +279,31 @@ void stepper_motor_manual_step(uint8_t motor_id, uint32_t steps, uint32_t delay_
             printf("Step %lu\n", i);
         }
     }
-
     printf("Manual stepping complete\n");
 
-    // Reconfigure the pin for timer functionality afterward
+    // Reconfigure the pin for timer functionality afterward with correct alternate function
+    uint32_t gpio_af;
+    switch (motor->timer_id)
+    {
+    case TIMER1_ID:
+        gpio_af = GPIO_AF4_TIM1;
+        break;
+    case TIMER2_ID:
+        gpio_af = GPIO_AF1_TIM2;
+        break;
+    case TIMER3_ID:
+        gpio_af = GPIO_AF2_TIM3;
+        break;
+    case TIMER4_ID:
+        gpio_af = GPIO_AF2_TIM4;
+        break;
+    default:
+        gpio_af = GPIO_AF4_TIM1; // Default fallback
+        break;
+    }
+
     BSP_GPIO_pin_config(motor->pul_gpio, motor->pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL,
-                        GPIO_SPEED_FREQ_HIGH, GPIO_AF4_TIM1);
+                        GPIO_SPEED_FREQ_HIGH, gpio_af);
 }
 
 /**
@@ -292,20 +331,17 @@ void stepper_motor_speed_test(uint8_t motor_id)
 
         // Wait until motor stops
         uint32_t start_time = HAL_GetTick();
-        uint32_t timeout = 5000 + (1000 * 1000 / speed); // More time for slower speeds
-        last_print = 0;                                  // Reset print timer for this test
-
-        while (stepper_motor_get_state(motor_id) != MOTOR_STATE_IDLE)
+        uint32_t timeout = 5000 + (1000 * 1000 / speed); // More time for slower speeds        while (stepper_motor_get_state(motor_id) != MOTOR_STATE_IDLE)
         {
             stepper_motor_update();
 
             // Print progress periodically
+            static uint32_t last_print[STEPPER_MAX_MOTORS] = {0}; // Separate for each motor
             uint32_t now = HAL_GetTick();
-            if (now - last_print >= 500) // Every 500ms
+            if (now - last_print[motor_id] >= 500) // Every 500ms
             {
-                last_print = now;
-                printf("Motor %d progress: %lu/%lu steps\n",
-                       motor_id,
+                last_print[motor_id] = now;
+                printf("Motor %d Progress: %lu/%lu steps\n", motor_id,
                        motors[motor_id].steps_moved,
                        motors[motor_id].steps_to_move);
             }
@@ -337,10 +373,14 @@ bool stepper_motor_reset(uint8_t motor_id)
     // Check if motor_id is valid
     if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
     {
+        printf("ERROR: Cannot reset motor %d - not valid or not initialized!\n", motor_id);
         return false;
     }
 
     stepper_motor_t *motor = &motors[motor_id];
+
+    printf("Resetting motor %d (current state: %d, steps_moved: %lu)\n",
+           motor_id, motor->state, motor->steps_moved);
 
     // Stop the motor if it's moving
     if (motor->state == MOTOR_STATE_MOVING)
@@ -422,26 +462,18 @@ static void timer_interrupt_handler(timer_id_t timer_id)
     static uint32_t last_tick[4] = {0}; // Separate last tick for each timer
     uint32_t current_tick = HAL_GetTick();
 
-    // Use array index based on timer ID
-    uint8_t timer_idx = timer_id;
-    if (timer_idx >= 4)
-        timer_idx = 0; // Safety check
-
-    counter[timer_idx]++;
-
-    // Debug output at reasonable intervals
-    if (current_tick - last_tick[timer_idx] >= 1000)
+    counter++; // Debug output at reasonable intervals
+    if (current_tick - last_tick >= 1000)
     {
-        last_tick[timer_idx] = current_tick;
-        printf("Timer %d: counter=%lu\n",
-               timer_id, counter[timer_idx]);
-
-        // Only print steps for motors using this timer
-        for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
+        last_tick = current_tick;
+        // Find which motor is currently moving for debug output
+        for (uint8_t j = 0; j < STEPPER_MAX_MOTORS; j++)
         {
-            if (motors[i].initialized && motors[i].timer_id == timer_id)
+            if (motors[j].initialized && motors[j].state == MOTOR_STATE_MOVING && motors[j].timer_id == timer_id)
             {
-                printf("  Motor %d: %lu steps moved\n", i, motors[i].steps_moved);
+                printf("Timer %d: counter=%lu, steps moved for motor %d: %lu\n",
+                       timer_id, counter, j, motors[j].steps_moved);
+                break;
             }
         }
     }
