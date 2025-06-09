@@ -16,6 +16,8 @@
 
 - [Tuto](https://devblogs.microsoft.com/cppblog/importing-st-projects-into-visual-studio-code/)
 
+// TODO : STM32 extension
+
 #### Clone le git :
 
 - `git clone https://github.com/TechieOllie/Modular_3D_Printer.git`

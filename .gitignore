@@ -1,0 +1,3 @@
+# This file is used to ignore files and directories in a Git repository.
+Kinematics_Prototype/SOFT/g431-master/build/debug/build/*/
+Kinematics_Prototype/SOFT/g431-master/build/

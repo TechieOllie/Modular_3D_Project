@@ -1,0 +1,13 @@
+{
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "cmake.configureOnOpen": true,
+  "files.associations": {
+    "stm32g4_sys.h": "c",
+    "parser.h": "c"
+  },
+  "remote.extensionKind": {
+    "stmicroelectronics.stm32-vscode-extension": [
+      "workspace"
+    ]
+  }
+}
