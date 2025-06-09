@@ -22,12 +22,18 @@
 #include "kinematics.h"
 #include "limit_switches.h"
 
+UART_HandleTypeDef huart2;
+
 #define BLINK_DELAY 100 // ms
 #define MAX_CMD_LENGTH 128
 
 // Motor ID constants
 #define X_MOTOR_ID 0
 #define Y_MOTOR_ID 1
+
+// UART receive buffer
+static uint8_t uart_rx_buffer[1];
+static volatile bool uart_error = false;
 
 void setup_limit_switches(void)
 {
@@ -60,9 +66,9 @@ void setup_limit_switches(void)
 
 void setup_stepper_motors(void)
 {
-    // Initialize motors
-    // X-axis motor using Timer1, Channel 2 on pins PA9(PUL), PA10(DIR) with 8 microsteps
-    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_9, GPIOA, GPIO_PIN_10, TIMER1_ID, TIM_CHANNEL_2, 8);
+    // Initialize motors with non-conflicting timer channels
+    // X-axis motor using Timer1, Channel 1 on pins PA8(PUL), PA10(DIR) with 8 microsteps
+    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_8, GPIOA, GPIO_PIN_10, TIMER1_ID, TIM_CHANNEL_1, 8);
 
     // Y-axis motor using Timer3, Channel 1 on pins PB4(PUL), PB5(DIR) with 8 microsteps
     stepper_motor_init(Y_MOTOR_ID, GPIOB, GPIO_PIN_4, GPIOB, GPIO_PIN_5, TIMER3_ID, TIM_CHANNEL_1, 8);
@@ -261,7 +267,14 @@ int main(void)
         while (1)
             ; // Stop here if parser fails
     }
-    printf("G-code parser initialized.\n");
+    // Enable UART receive interrupt for G-code input
+    if (HAL_UART_Receive_IT(&huart2, uart_rx_buffer, 1) != HAL_OK)
+    {
+        printf("ERROR: Failed to enable UART receive interrupt!\n");
+        while (1)
+            ; // Stop here if UART receive fails
+    }
+    printf("UART receive enabled for G-code input\n");
 
     // Run tests
     HAL_Delay(2000); // Wait a bit before starting tests
@@ -280,38 +293,39 @@ int main(void)
     // Main loop
     while (1)
     {
-        // Check for incoming UART data and process G-code
-        // Note: You'll need to implement UART receive interrupt or polling
-        // For now, we'll just update the systems
-
-        kinematics_update();     // Update kinematics system
-        stepper_motor_update();  // Update stepper motors
-        limit_switches_update(); // Update limit switches
-
-        // Update parser with current position periodically
-        static uint32_t last_pos_update = 0;
-        if (HAL_GetTick() - last_pos_update > 100) // Every 100ms
+        // Check for UART errors and restart if needed
+        if (uart_error)
         {
-            last_pos_update = HAL_GetTick();
-            position_t current_pos = kinematics_get_position();
-            parser_update_position(current_pos);
+            printf("Recovering from UART error...\n");
+            if (HAL_UART_Receive_IT(&huart2, uart_rx_buffer, 1) == HAL_OK)
+            {
+                uart_error = false;
+                printf("UART recovery successful\n");
+            }
         }
+            static uint32_t last_pos_update = 0;
+            if (HAL_GetTick() - last_pos_update > 100) // Every 100ms
+            {
+                last_pos_update = HAL_GetTick();
+                position_t current_pos = kinematics_get_position();
+                parser_update_position(current_pos);
+            }
 
-        HAL_Delay(10);
+            HAL_Delay(10);
 
-        // Debug output every 5 seconds
-        static uint32_t last_debug = 0;
-        if (HAL_GetTick() - last_debug > 5000) // Every 5 seconds
-        {
-            last_debug = HAL_GetTick();
-            position_t pos = kinematics_get_position();
-            move_state_t state = kinematics_get_state();
-            parser_state_t *parser_state = parser_get_state();
+            // Debug output every 5 seconds
+            static uint32_t last_debug = 0;
+            if (HAL_GetTick() - last_debug > 5000) // Every 5 seconds
+            {
+                last_debug = HAL_GetTick();
+                position_t pos = kinematics_get_position();
+                move_state_t state = kinematics_get_state();
+                parser_state_t *parser_state = parser_get_state();
 
-            printf("Status - Position: X=%.2f, Y=%.2f, State: %d, Parser Mode: %s, Feedrate: %.1f\n",
-                   pos.x, pos.y, state,
-                   parser_state->absolute_mode ? "ABS" : "REL",
-                   parser_state->feedrate);
+                printf("Status - Position: X=%.2f, Y=%.2f, State: %d, Parser Mode: %s, Feedrate: %.1f\n",
+                       pos.x, pos.y, state,
+                       parser_state->absolute_mode ? "ABS" : "REL",
+                       parser_state->feedrate);
+            }
         }
     }
-}

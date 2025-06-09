@@ -11,6 +11,7 @@
 #include "parser.h"
 #include "kinematics.h"
 #include "stepper_motor.h"
+#include "stm32g4xx_hal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -630,4 +631,12 @@ bool parser_execute_gcode(const char *gcode)
 
     free(line_copy);
     return result;
+}
+
+/**
+ * @brief UART receive callback for G-code processing
+ */
+void parser_uart_receive_callback(UART_HandleTypeDef *huart, uint8_t data)
+{
+    parser_process_char((char)data);
 }

@@ -14,6 +14,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "kinematics.h"
+#include "stm32g4xx_hal.h"
 
 /* Exported constants --------------------------------------------------------*/
 #define MAX_LINE_LENGTH 128
@@ -114,6 +115,13 @@ parser_state_t *parser_get_state(void);
  * @param pos Current position from kinematics system
  */
 void parser_update_position(position_t pos);
+
+/**
+ * @brief UART receive callback for G-code processing
+ * @param huart UART handle
+ * @param data Received byte
+ */
+void parser_uart_receive_callback(UART_HandleTypeDef *huart, uint8_t data);
 
 /* Common G-code commands for reference:
  *
