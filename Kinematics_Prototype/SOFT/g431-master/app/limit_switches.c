@@ -294,15 +294,8 @@ const char *limit_switch_position_to_string(limit_position_t position)
  */
 static uint8_t gpio_pin_to_pin_number(uint16_t gpio_pin)
 {
-    // Convert GPIO_PIN_x to pin number (0-15)
-    for (uint8_t i = 0; i < 16; i++)
-    {
-        if (gpio_pin == (1 << i))
-        {
-            return i;
-        }
-    }
-    return 0; // Default to pin 0 if not found
+    // Use built-in function to count trailing zeros (which gives us the pin number)
+    return __builtin_ctz(gpio_pin);
 }
 
 /**

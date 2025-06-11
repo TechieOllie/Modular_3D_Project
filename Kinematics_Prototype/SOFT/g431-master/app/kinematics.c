@@ -406,26 +406,32 @@ static bool execute_move(const position_t *start_pos, const position_t *end_pos,
     // Calculate time for the move in seconds
     float move_time_sec = (total_distance / feedrate) * 60.0f; // feedrate is in mm/min
 
-    // Calculate steps per second for each axis
+    // Calculate steps per second for each axis with improved speed limits
     uint32_t steps_per_sec_x = 0;
     uint32_t steps_per_sec_y = 0;
+    uint32_t min_speed = 6000;  // Minimum 6000 Hz (optimal from vibration tests)
+    uint32_t max_speed = 15000; // Maximum 15000 Hz for high-speed operation
 
     if (steps_x > 0)
     {
         steps_per_sec_x = (uint32_t)(steps_x / move_time_sec);
-        if (steps_per_sec_x < 1)
-            steps_per_sec_x = 1; // Minimum speed
+        if (steps_per_sec_x < min_speed)
+            steps_per_sec_x = min_speed; // Minimum speed
+        if (steps_per_sec_x > max_speed)
+            steps_per_sec_x = max_speed; // Maximum speed limit
     }
 
     if (steps_y > 0)
     {
         steps_per_sec_y = (uint32_t)(steps_y / move_time_sec);
-        if (steps_per_sec_y < 1)
-            steps_per_sec_y = 1; // Minimum speed
+        if (steps_per_sec_y < min_speed)
+            steps_per_sec_y = min_speed; // Minimum speed
+        if (steps_per_sec_y > max_speed)
+            steps_per_sec_y = max_speed; // Maximum speed limit
     }
 
-    printf("Move time: %.2f sec, Speeds: X=%lu Hz, Y=%lu Hz\n",
-           move_time_sec, steps_per_sec_x, steps_per_sec_y);
+    printf("Move time: %.2f sec, Speeds: X=%lu Hz, Y=%lu Hz (range: %lu-%lu Hz)\n",
+           move_time_sec, steps_per_sec_x, steps_per_sec_y, min_speed, max_speed);
 
     // Start movement for both axes simultaneously
     bool success = true;

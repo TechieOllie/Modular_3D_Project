@@ -64,6 +64,13 @@ typedef struct
     uint32_t steps_to_move;
     uint32_t steps_moved;
 
+    // Acceleration parameters
+    uint32_t target_speed_hz;
+    uint32_t current_speed_hz;
+    uint32_t acceleration_steps_per_sec2;
+    uint32_t accel_steps;
+    uint32_t decel_start_step;
+
     // Initialization flag
     bool initialized;
 
@@ -228,5 +235,30 @@ bool stepper_motors_all_idle(uint8_t num_motors, uint8_t *motor_ids);
  * @param motor_id Motor identifier
  */
 void stepper_motor_simple_speed_test(uint8_t motor_id);
+
+/**
+ * @brief Set motor acceleration parameters
+ * @param motor_id Motor identifier
+ * @param acceleration_steps_per_sec2 Acceleration in steps/sec²
+ * @return true if successful
+ */
+bool stepper_motor_set_acceleration(uint8_t motor_id, uint32_t acceleration_steps_per_sec2);
+
+/**
+ * @brief Emergency stop all motors immediately
+ */
+void stepper_motor_emergency_stop_all(void);
+
+/**
+ * @brief High frequency speed test to find optimal range
+ * @param motor_id Motor identifier
+ */
+void stepper_motor_high_frequency_test(uint8_t motor_id);
+
+/**
+ * @brief Test motor hardware connections
+ * @param motor_id Motor identifier
+ */
+void stepper_motor_test_hardware(uint8_t motor_id);
 
 #endif /* STEPPER_MOTOR_H */

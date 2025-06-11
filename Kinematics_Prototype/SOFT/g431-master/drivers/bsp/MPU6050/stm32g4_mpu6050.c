@@ -66,14 +66,14 @@
  * @param	AccelerometerSensitivity : 		voir MPU6050_Accelerometer_t
  * @param	GyroscopeSensitivity :			voir MPU6050_Gyroscope_t
  */
-MPU6050_Result_t MPU6050_Init(MPU6050_t* DataStruct, GPIO_TypeDef * GPIOx, uint16_t GPIO_PIN_x, MPU6050_Device_t DeviceNumber, MPU6050_Accelerometer_t AccelerometerSensitivity, MPU6050_Gyroscope_t GyroscopeSensitivity)
+MPU6050_Result_t MPU6050_Init(MPU6050_t *DataStruct, GPIO_TypeDef *GPIOx, uint16_t GPIO_PIN_x, MPU6050_Device_t DeviceNumber, MPU6050_Accelerometer_t AccelerometerSensitivity, MPU6050_Gyroscope_t GyroscopeSensitivity)
 {
 	uint8_t temp;
 
-	if(GPIOx != NULL)
+	if (GPIOx != NULL)
 	{
-		BSP_GPIO_pin_config(GPIOx, GPIO_PIN_x,GPIO_MODE_OUTPUT_PP,GPIO_PULLUP,GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
-		HAL_GPIO_WritePin(GPIOx,GPIO_PIN_x,GPIO_PIN_SET);
+		BSP_GPIO_pin_config(GPIOx, GPIO_PIN_x, GPIO_MODE_OUTPUT_PP, GPIO_PULLUP, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
+		HAL_GPIO_WritePin(GPIOx, GPIO_PIN_x, GPIO_PIN_SET);
 	}
 	HAL_Delay(20);
 
@@ -84,7 +84,8 @@ MPU6050_Result_t MPU6050_Init(MPU6050_t* DataStruct, GPIO_TypeDef * GPIOx, uint1
 	BSP_I2C_Init(MPU6050_I2C, STANDARD_MODE, true);
 
 	/* On vérifie que le capteur est bien connecté */
-	if (!BSP_I2C_IsDeviceConnected(MPU6050_I2C, DataStruct->Address)) {
+	if (!BSP_I2C_IsDeviceConnected(MPU6050_I2C, DataStruct->Address))
+	{
 		/* Return error */
 		return MPU6050_Result_DeviceNotConnected;
 	}
@@ -92,7 +93,8 @@ MPU6050_Result_t MPU6050_Init(MPU6050_t* DataStruct, GPIO_TypeDef * GPIOx, uint1
 	/* Check le "who I am" */
 	uint8_t i_am;
 	BSP_I2C_Read(MPU6050_I2C, DataStruct->Address, MPU6050_WHO_AM_I, &i_am);
-	if (i_am != MPU6050_I_AM && i_am != MPU9250_I_AM && i_am != MPU9255_I_AM && i_am != MPU6060_I_AM_STRANGE_MODEL) {
+	if (i_am != MPU6050_I_AM && i_am != MPU9250_I_AM && i_am != MPU9255_I_AM && i_am != MPU6060_I_AM_STRANGE_MODEL)
+	{
 		/* Return error */
 		return MPU6050_Result_DeviceInvalid;
 	}
@@ -111,38 +113,40 @@ MPU6050_Result_t MPU6050_Init(MPU6050_t* DataStruct, GPIO_TypeDef * GPIOx, uint1
 	BSP_I2C_Write(MPU6050_I2C, DataStruct->Address, MPU6050_GYRO_CONFIG, temp);
 
 	/* On définie les sensiblités pour multiplier les données du gyroscope et de l'accéléromètre */
-	switch (AccelerometerSensitivity) {
-		case MPU6050_Accelerometer_2G:
-			DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_2;
-			break;
-		case MPU6050_Accelerometer_4G:
-			DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_4;
-			break;
-		case MPU6050_Accelerometer_8G:
-			DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_8;
-			break;
-		case MPU6050_Accelerometer_16G:
-			DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_16;
-			//no break
-		default:
-			break;
+	switch (AccelerometerSensitivity)
+	{
+	case MPU6050_Accelerometer_2G:
+		DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_2;
+		break;
+	case MPU6050_Accelerometer_4G:
+		DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_4;
+		break;
+	case MPU6050_Accelerometer_8G:
+		DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_8;
+		break;
+	case MPU6050_Accelerometer_16G:
+		DataStruct->Acce_Mult = (float)1 / MPU6050_ACCE_SENS_16;
+		// no break
+	default:
+		break;
 	}
 
-	switch (GyroscopeSensitivity) {
-		case MPU6050_Gyroscope_250s:
-			DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_250;
-			break;
-		case MPU6050_Gyroscope_500s:
-			DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_500;
-			break;
-		case MPU6050_Gyroscope_1000s:
-			DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_1000;
-			break;
-		case MPU6050_Gyroscope_2000s:
-			DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_2000;
-			// no break
-		default:
-			break;
+	switch (GyroscopeSensitivity)
+	{
+	case MPU6050_Gyroscope_250s:
+		DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_250;
+		break;
+	case MPU6050_Gyroscope_500s:
+		DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_500;
+		break;
+	case MPU6050_Gyroscope_1000s:
+		DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_1000;
+		break;
+	case MPU6050_Gyroscope_2000s:
+		DataStruct->Gyro_Mult = (float)1 / MPU6050_GYRO_SENS_2000;
+		// no break
+	default:
+		break;
 	}
 
 	/* Return OK */
@@ -154,7 +158,8 @@ MPU6050_Result_t MPU6050_Init(MPU6050_t* DataStruct, GPIO_TypeDef * GPIOx, uint1
  * @param DataStruct: pointeur vers la structure où vont être stockées les données
  * @return Message de réussite de l'opération
  */
-MPU6050_Result_t MPU6050_ReadAccelerometer(MPU6050_t* DataStruct) {
+MPU6050_Result_t MPU6050_ReadAccelerometer(MPU6050_t *DataStruct)
+{
 	uint8_t data[6];
 	BSP_I2C_ReadMulti(MPU6050_I2C, DataStruct->Address, MPU6050_ACCEL_XOUT_H, data, 6);
 
@@ -171,7 +176,8 @@ MPU6050_Result_t MPU6050_ReadAccelerometer(MPU6050_t* DataStruct) {
  * @param DataStruct: pointeur vers la structure où vont être stockées les données
  * @return Message de réussite de l'opération
  */
-MPU6050_Result_t MPU6050_ReadGyroscope(MPU6050_t* DataStruct) {
+MPU6050_Result_t MPU6050_ReadGyroscope(MPU6050_t *DataStruct)
+{
 	uint8_t data[6];
 	BSP_I2C_ReadMulti(MPU6050_I2C, DataStruct->Address, MPU6050_GYRO_XOUT_H, data, 6);
 
@@ -188,7 +194,8 @@ MPU6050_Result_t MPU6050_ReadGyroscope(MPU6050_t* DataStruct) {
  * @param DataStruct: pointeur vers la structure où vont être stockées les données
  * @return Message de réussite de l'opération
  */
-MPU6050_Result_t MPU6050_ReadTemperature(MPU6050_t* DataStruct) {
+MPU6050_Result_t MPU6050_ReadTemperature(MPU6050_t *DataStruct)
+{
 	uint8_t data[2];
 	int16_t temp;
 	BSP_I2C_ReadMulti(MPU6050_I2C, DataStruct->Address, MPU6050_TEMP_OUT_H, data, 2);
@@ -205,7 +212,8 @@ MPU6050_Result_t MPU6050_ReadTemperature(MPU6050_t* DataStruct) {
  * @param DataStruct: pointeur vers la structure où vont être stockées les données
  * @return Message de réussite de l'opération
  */
-MPU6050_Result_t MPU6050_ReadAll(MPU6050_t* DataStruct) {
+MPU6050_Result_t MPU6050_ReadAll(MPU6050_t *DataStruct)
+{
 	uint8_t data[14];
 	int16_t temp;
 
@@ -231,7 +239,8 @@ MPU6050_Result_t MPU6050_ReadAll(MPU6050_t* DataStruct) {
  * @brief Fonction de démo pour prendre en main le capteur rapidement.
  * @pre /!\ Cette fonction est blocante /!\
  */
-void MPU6050_demo(void){
+void MPU6050_demo(void)
+{
 
 	MPU6050_t MPU6050_Data;
 	int32_t gyro_x = 0;
@@ -239,7 +248,8 @@ void MPU6050_demo(void){
 	int32_t gyro_z = 0;
 
 	/* Initialise le MPU6050 */
-	if (MPU6050_Init(&MPU6050_Data, GPIOA, GPIO_PIN_0, MPU6050_Device_0, MPU6050_Accelerometer_8G, MPU6050_Gyroscope_2000s) != MPU6050_Result_Ok) {
+	if (MPU6050_Init(&MPU6050_Data, GPIOA, GPIO_PIN_0, MPU6050_Device_0, MPU6050_Accelerometer_8G, MPU6050_Gyroscope_2000s) != MPU6050_Result_Ok)
+	{
 		/*
 		// Affiche error avec le debug_printf
 		debug_printf("MPU6050 Error\n");
@@ -249,9 +259,11 @@ void MPU6050_demo(void){
 		printf("MPU6050 Error\n");
 
 		// Boucle infinie
-		while (1);
+		while (1)
+			;
 	}
-	while (1) {
+	while (1)
+	{
 		// On
 		MPU6050_ReadAll(&MPU6050_Data);
 
@@ -273,20 +285,18 @@ void MPU6050_demo(void){
 						MPU6050_Data.Temperature);
 
 		*/
-		 // Affiche avec l'UART
-		 printf("AX%4d\tAY%4d\tAZ%4d\tGX%4d\tGY%4d\tGZ%4d\tgx%4ld\tgy%4ld\tgz%4ld\tT%3d\n",
-					    (uint16_t)MPU6050_Data.Accelerometer_X/410,	//environ en %
-					    (uint16_t)MPU6050_Data.Accelerometer_Y/410,	//environ en %
-					    (uint16_t)MPU6050_Data.Accelerometer_Z/410,	//environ en %
-					    (uint16_t)MPU6050_Data.Gyroscope_X,
-					    (uint16_t)MPU6050_Data.Gyroscope_Y,
-					    (uint16_t)MPU6050_Data.Gyroscope_Z,
-						(uint32_t)gyro_x/16400,						//environ en °
-						(uint32_t)gyro_y/16400,						//environ en °
-						(uint32_t)gyro_z/16400,						//environ en °
-						(uint16_t)MPU6050_Data.Temperature);
-
-
+		// Affiche avec l'UART
+		printf("AX%4d\tAY%4d\tAZ%4d\tGX%4d\tGY%4d\tGZ%4d\tgx%4ld\tgy%4ld\tgz%4ld\tT%.1f\n",
+			   (int16_t)(MPU6050_Data.Accelerometer_X / 410), // environ en %
+			   (int16_t)(MPU6050_Data.Accelerometer_Y / 410), // environ en %
+			   (int16_t)(MPU6050_Data.Accelerometer_Z / 410), // environ en %
+			   (int16_t)MPU6050_Data.Gyroscope_X,
+			   (int16_t)MPU6050_Data.Gyroscope_Y,
+			   (int16_t)MPU6050_Data.Gyroscope_Z,
+			   (int32_t)(gyro_x / 16400), // environ en °
+			   (int32_t)(gyro_y / 16400), // environ en °
+			   (int32_t)(gyro_z / 16400), // environ en °
+			   MPU6050_Data.Temperature);
 
 		// Un petit délai pour éviter d'avoir un raz-de-marée d'information
 		HAL_Delay(500);
@@ -294,5 +304,3 @@ void MPU6050_demo(void){
 }
 
 #endif
-
-

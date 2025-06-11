@@ -105,10 +105,10 @@ bool stepper_motor_init(uint8_t motor_id,
            motor_id,
            (pul_gpio == GPIOA) ? "GPIOA" : (pul_gpio == GPIOB) ? "GPIOB"
                                                                : "GPIOC",
-           pul_pin,
+           __builtin_ctz(pul_pin), // Convert GPIO_PIN_x to actual pin number
            (dir_gpio == GPIOA) ? "GPIOA" : (dir_gpio == GPIOB) ? "GPIOB"
                                                                : "GPIOC",
-           dir_pin,
+           __builtin_ctz(dir_pin), // Convert GPIO_PIN_x to actual pin number
            timer_id, timer_channel);
 
     return true;
@@ -270,13 +270,19 @@ bool stepper_motor_stop(uint8_t motor_id)
 
     stepper_motor_t *motor = &motors[motor_id];
 
-    // Stop the timer
-    BSP_TIMER_stop(motor->timer_id);
+    // Stop the timer completely
+    BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, 0, false, false);
 
-    // Reconfigure pin as output and ensure it's low
+    // Wait a bit to ensure timer is completely stopped
+    HAL_Delay(1);
+
+    // Reconfigure pin as output and ensure it's low - this is the key fix
     BSP_GPIO_pin_config(motor->pul_gpio, motor->pul_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL,
                         GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
     HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_RESET);
+
+    // Also ensure DIR pin is in a stable state
+    HAL_GPIO_WritePin(motor->dir_gpio, motor->dir_pin, GPIO_PIN_RESET);
 
     // Print final step count
     printf("Motor %d stopped: moved %lu of %lu steps\n",
@@ -284,10 +290,8 @@ bool stepper_motor_stop(uint8_t motor_id)
 
     // Update motor state and reset counters
     motor->state = MOTOR_STATE_IDLE;
-
-    // Don't reset steps_moved here, so we can see the final count
-    // motor->steps_moved = 0;
-    // motor->steps_to_move = 0;
+    motor->target_speed_hz = 0;
+    motor->current_speed_hz = 0;
 
     return true;
 }
@@ -519,34 +523,83 @@ static void set_direction_pin(stepper_motor_t *motor, stepper_motor_dir_t direct
 }
 
 /**
- * @brief Configure timer for PWM generation
+ * @brief Configure timer for PWM generation with improved acceleration
  *
  * @param motor The motor structure to configure
  * @param frequency_hz The desired PWM frequency in Hz
  */
 static void configure_pwm_timer(stepper_motor_t *motor, uint32_t frequency_hz)
 {
-    // Calculate period for the timer based on frequency
-    uint32_t period_us = 1000000 / frequency_hz;
+    // Start with much higher frequency to reduce vibration
+    uint32_t start_frequency = frequency_hz / 2; // Start at 50% of target speed
+    if (start_frequency < 6000)
+        start_frequency = 6000; // Minimum 6000 Hz (optimal frequency from tests)
+    if (start_frequency > 15000)
+        start_frequency = 15000; // Maximum 15000 Hz
 
-    printf("Configuring timer %d for %lu Hz (period = %lu us)\n",
-           motor->timer_id, frequency_hz, period_us);
+    // Limit maximum target frequency
+    if (frequency_hz > 15000)
+        frequency_hz = 15000;
+
+    // If target is close to start frequency, just use target
+    if (frequency_hz - start_frequency < 1000)
+    {
+        start_frequency = frequency_hz;
+    }
+
+    // Calculate period for the timer based on start frequency
+    uint32_t period_us = 1000000 / start_frequency;
+
+    printf("Configuring timer %d for %lu Hz (starting at %lu Hz, period = %lu us)\n",
+           motor->timer_id, frequency_hz, start_frequency, period_us);
 
     // Stop the timer if it was running
     BSP_TIMER_stop(motor->timer_id);
 
+    // Ensure PUL pin is configured for timer alternate function
+    uint32_t gpio_af;
+    switch (motor->timer_id)
+    {
+    case TIMER1_ID:
+        gpio_af = GPIO_AF4_TIM1;
+        break;
+    case TIMER2_ID:
+        gpio_af = GPIO_AF1_TIM2;
+        break;
+    case TIMER3_ID:
+        gpio_af = GPIO_AF2_TIM3;
+        break;
+    case TIMER4_ID:
+        gpio_af = GPIO_AF2_TIM4;
+        break;
+    default:
+        gpio_af = GPIO_AF4_TIM1; // Default fallback
+        break;
+    }
+
+    BSP_GPIO_pin_config(motor->pul_gpio, motor->pul_pin, GPIO_MODE_AF_PP, GPIO_NOPULL,
+                        GPIO_SPEED_FREQ_VERY_HIGH, gpio_af);
+
     // Configure timer in PWM mode
-    // First run the timer to set it up with the correct period
     BSP_TIMER_run_us(motor->timer_id, period_us, true);
 
-    // For high frequencies, you might need a different duty cycle
-    // 50% duty cycle is usually optimal
+    // Use 50% duty cycle for clean step signal
     uint16_t duty_cycle = 500; // 50% of 1000
 
-    BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, duty_cycle, false, false);
+    // Enable PWM with interrupt generation
+    BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, duty_cycle, false, true); // Enable interrupt
 
-    printf("PWM enabled on timer %d channel %d at %lu Hz\n",
-           motor->timer_id, motor->timer_channel, frequency_hz);
+    // Store acceleration parameters
+    motor->target_speed_hz = frequency_hz;
+    motor->current_speed_hz = start_frequency;
+    motor->acceleration_steps_per_sec2 = 8000; // Increased acceleration for faster ramp-up
+    motor->accel_steps = 0;
+
+    // Calculate when to start deceleration (last 25% of move)
+    motor->decel_start_step = (motor->steps_to_move * 3) / 4;
+
+    printf("PWM enabled on timer %d channel %d at %lu Hz (will ramp to %lu Hz)\n",
+           motor->timer_id, motor->timer_channel, start_frequency, frequency_hz);
 }
 
 /**
@@ -584,26 +637,24 @@ static void timer_interrupt_handler(timer_id_t timer_id)
             continue;
         }
 
-        // Generate step pulse manually
-        HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_SET);
-
-        // Short delay for pulse width (TB6600 needs minimum 2.5µs)
-        // Use a simple loop or hardware timer for precise timing
-        for (volatile int j = 0; j < 10; j++)
-        { /* ~1µs delay */
-        }
-
-        HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_RESET);
-
-        // Increment steps counter
+        // Increment steps counter first
         motor->steps_moved++;
 
         // Check if movement is complete
         if (motor->steps_moved >= motor->steps_to_move)
         {
-            // Stop this motor
+            // Stop this motor immediately
             BSP_TIMER_stop(motor->timer_id);
+
+            // Reconfigure pin as output and ensure it's low
+            BSP_GPIO_pin_config(motor->pul_gpio, motor->pul_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL,
+                                GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
+            HAL_GPIO_WritePin(motor->pul_gpio, motor->pul_pin, GPIO_PIN_RESET);
+
+            // Set motor state to idle
             motor->state = MOTOR_STATE_IDLE;
+            motor->target_speed_hz = 0;
+            motor->current_speed_hz = 0;
 
             printf("Motor %d completed: %lu steps\n", i, motor->steps_moved);
         }
@@ -871,4 +922,98 @@ static bool check_motor_limits_before_move(uint8_t motor_id, stepper_motor_dir_t
     }
 
     return true;
+}
+
+/**
+ * @brief Set motor acceleration parameters
+ */
+bool stepper_motor_set_acceleration(uint8_t motor_id, uint32_t acceleration_steps_per_sec2)
+{
+    if (motor_id >= STEPPER_MAX_MOTORS || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    motors[motor_id].acceleration_steps_per_sec2 = acceleration_steps_per_sec2;
+    printf("Motor %d acceleration set to %lu steps/sec²\n", motor_id, acceleration_steps_per_sec2);
+
+    return true;
+}
+
+/**
+ * @brief High frequency speed test to find optimal range
+ */
+void stepper_motor_high_frequency_test(uint8_t motor_id)
+{
+    // Test higher frequencies to reduce vibration
+    uint32_t test_speeds[] = {2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000};
+    uint8_t num_speeds = sizeof(test_speeds) / sizeof(test_speeds[0]);
+
+    printf("Starting high frequency test sequence...\n");
+
+    for (uint8_t i = 0; i < num_speeds; i++)
+    {
+        uint32_t speed = test_speeds[i];
+        printf("Testing speed: %lu Hz for 200 steps\n", speed);
+
+        // Reset motor
+        stepper_motor_reset(motor_id);
+        HAL_Delay(500);
+
+        // Move at constant high speed
+        stepper_motor_move(motor_id, 200, speed, MOTOR_DIR_CLOCKWISE);
+
+        // Wait for completion
+        uint32_t start_time = HAL_GetTick();
+        uint32_t timeout = 3000;
+
+        while (stepper_motor_get_state(motor_id) != MOTOR_STATE_IDLE)
+        {
+            stepper_motor_update();
+
+            if (HAL_GetTick() - start_time > timeout)
+            {
+                printf("Timeout - forcing stop\n");
+                stepper_motor_stop(motor_id);
+                break;
+            }
+
+            HAL_Delay(10);
+        }
+
+        printf("Completed %lu Hz test - check vibration and accuracy\n", speed);
+        HAL_Delay(1500); // Brief pause between tests
+    }
+
+    printf("High frequency test complete!\n");
+}
+
+/**
+ * @brief Emergency stop all motors
+ */
+void stepper_motor_emergency_stop_all(void)
+{
+    printf("EMERGENCY STOP - Stopping all motors immediately\n");
+
+    for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
+    {
+        if (motors[i].initialized)
+        {
+            // Force stop the timer
+            BSP_TIMER_stop(motors[i].timer_id);
+
+            // Reconfigure GPIO as output and set low
+            BSP_GPIO_pin_config(motors[i].pul_gpio, motors[i].pul_pin, GPIO_MODE_OUTPUT_PP,
+                                GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
+            HAL_GPIO_WritePin(motors[i].pul_gpio, motors[i].pul_pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(motors[i].dir_gpio, motors[i].dir_pin, GPIO_PIN_RESET);
+
+            // Update motor state
+            motors[i].state = MOTOR_STATE_IDLE;
+            motors[i].target_speed_hz = 0;
+            motors[i].current_speed_hz = 0;
+        }
+    }
+
+    printf("All motors stopped\n");
 }
