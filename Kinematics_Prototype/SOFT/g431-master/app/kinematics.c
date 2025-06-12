@@ -109,18 +109,29 @@ bool kinematics_move_to(const position_t *target_pos, float feedrate)
         return false;
     }
 
-    printf("Moving to position: X=%.2f, Y=%.2f at %.1f mm/min\n",
-           target_pos->x, target_pos->y, feedrate);
+    // Validate feedrate
+    if (feedrate <= 0)
+    {
+        feedrate = 600.0f; // Default 600 mm/min
+        printf("WARNING: Invalid feedrate, using default 600 mm/min\n");
+    }
+
+    printf("Moving from (%.2f, %.2f) to (%.2f, %.2f) at %.1f mm/min\n",
+           current_position.x, current_position.y, target_pos->x, target_pos->y, feedrate);
 
     // Execute the move
     if (execute_move(&current_position, target_pos, feedrate))
     {
         target_position = *target_pos;
         current_state = MOVE_STATE_MOVING;
+        printf("Move started successfully\n");
         return true;
     }
-
-    return false;
+    else
+    {
+        printf("Failed to start move\n");
+        return false;
+    }
 }
 
 /**
@@ -282,6 +293,14 @@ void kinematics_update(void)
         stepper_motor_state_t x_state = stepper_motor_get_state(machine_config.x_motor_id);
         stepper_motor_state_t y_state = stepper_motor_get_state(machine_config.y_motor_id);
 
+        // Debug motor states periodically
+        static uint32_t last_debug = 0;
+        if (HAL_GetTick() - last_debug > 1000) // Every 1 second
+        {
+            last_debug = HAL_GetTick();
+            printf("Kinematics update: X_state=%d, Y_state=%d\n", x_state, y_state);
+        }
+
         if (x_state == MOTOR_STATE_IDLE && y_state == MOTOR_STATE_IDLE)
         {
             // Movement complete - update current position to target
@@ -290,6 +309,12 @@ void kinematics_update(void)
 
             printf("Move completed - position: X=%.2f, Y=%.2f\n",
                    current_position.x, current_position.y);
+        }
+        else if (x_state == MOTOR_STATE_ERROR || y_state == MOTOR_STATE_ERROR)
+        {
+            // Handle error state
+            printf("Motor error detected - stopping movement\n");
+            kinematics_stop();
         }
     }
 }
@@ -394,65 +419,128 @@ static bool execute_move(const position_t *start_pos, const position_t *end_pos,
            steps_x, (dir_x == MOTOR_DIR_CLOCKWISE) ? "CW" : "CCW",
            steps_y, (dir_y == MOTOR_DIR_CLOCKWISE) ? "CW" : "CCW");
 
-    // Calculate move time and speeds for each axis
+    // Check if any movement is needed
+    if (steps_x == 0 && steps_y == 0)
+    {
+        printf("No movement needed - already at target position\n");
+        return true;
+    }
+
+    // Calculate speeds using a simplified approach for better reliability
+    // Convert feedrate from mm/min to mm/s
+    float feedrate_mm_per_sec = feedrate / 60.0f;
+
+    // Calculate individual axis speeds based on feedrate and distance ratio
     float total_distance = calculate_move_distance(start_pos, end_pos);
 
-    if (total_distance < 0.001f)
-    {
-        printf("Move distance too small, ignoring\n");
-        return true; // No movement needed
-    }
-
-    // Calculate time for the move in seconds
-    float move_time_sec = (total_distance / feedrate) * 60.0f; // feedrate is in mm/min
-
-    // Calculate steps per second for each axis with improved speed limits
     uint32_t steps_per_sec_x = 0;
     uint32_t steps_per_sec_y = 0;
-    uint32_t min_speed = 6000;  // Minimum 6000 Hz (optimal from vibration tests)
-    uint32_t max_speed = 15000; // Maximum 15000 Hz for high-speed operation
 
-    if (steps_x > 0)
+    // Set speed limits for reliable operation
+    uint32_t min_speed = 2000;     // Minimum 2000 Hz for smooth operation
+    uint32_t max_speed = 8000;     // Maximum 8000 Hz for reliable operation
+    uint32_t default_speed = 4000; // Default speed when calculation fails
+
+    if (total_distance > 0.001f) // Avoid division by zero
     {
-        steps_per_sec_x = (uint32_t)(steps_x / move_time_sec);
-        if (steps_per_sec_x < min_speed)
-            steps_per_sec_x = min_speed; // Minimum speed
-        if (steps_per_sec_x > max_speed)
-            steps_per_sec_x = max_speed; // Maximum speed limit
+        // Calculate time for the entire move
+        float move_time_sec = total_distance / feedrate_mm_per_sec;
+
+        // Calculate speed for each axis based on the move time
+        if (steps_x > 0)
+        {
+            steps_per_sec_x = (uint32_t)(steps_x / move_time_sec);
+            // Clamp to safe limits
+            if (steps_per_sec_x < min_speed)
+                steps_per_sec_x = min_speed;
+            if (steps_per_sec_x > max_speed)
+                steps_per_sec_x = max_speed;
+        }
+
+        if (steps_y > 0)
+        {
+            steps_per_sec_y = (uint32_t)(steps_y / move_time_sec);
+            // Clamp to safe limits
+            if (steps_per_sec_y < min_speed)
+                steps_per_sec_y = min_speed;
+            if (steps_per_sec_y > max_speed)
+                steps_per_sec_y = max_speed;
+        }
+    }
+    else
+    {
+        // Fallback to default speeds
+        if (steps_x > 0)
+            steps_per_sec_x = default_speed;
+        if (steps_y > 0)
+            steps_per_sec_y = default_speed;
     }
 
-    if (steps_y > 0)
-    {
-        steps_per_sec_y = (uint32_t)(steps_y / move_time_sec);
-        if (steps_per_sec_y < min_speed)
-            steps_per_sec_y = min_speed; // Minimum speed
-        if (steps_per_sec_y > max_speed)
-            steps_per_sec_y = max_speed; // Maximum speed limit
-    }
-
-    printf("Move time: %.2f sec, Speeds: X=%lu Hz, Y=%lu Hz (range: %lu-%lu Hz)\n",
-           move_time_sec, steps_per_sec_x, steps_per_sec_y, min_speed, max_speed);
+    printf("Calculated speeds: X=%lu Hz, Y=%lu Hz (feedrate=%.1f mm/min, distance=%.2f mm)\n",
+           steps_per_sec_x, steps_per_sec_y, feedrate, total_distance);
 
     // Start movement for both axes simultaneously
     bool success = true;
+    bool x_started = false;
+    bool y_started = false;
 
+    // Start X-axis movement
     if (steps_x > 0)
     {
-        if (!stepper_motor_move(machine_config.x_motor_id, steps_x, steps_per_sec_x, dir_x))
+        printf("Starting X-axis: %lu steps at %lu Hz, direction %d\n",
+               steps_x, steps_per_sec_x, dir_x);
+
+        if (stepper_motor_move(machine_config.x_motor_id, steps_x, steps_per_sec_x, dir_x))
+        {
+            x_started = true;
+            printf("X-axis movement started successfully\n");
+        }
+        else
         {
             printf("ERROR: Failed to start X-axis movement\n");
             success = false;
         }
     }
+    else
+    {
+        printf("X-axis: No movement needed\n");
+    }
 
+    // Start Y-axis movement
     if (steps_y > 0 && success)
     {
-        if (!stepper_motor_move(machine_config.y_motor_id, steps_y, steps_per_sec_y, dir_y))
+        printf("Starting Y-axis: %lu steps at %lu Hz, direction %d\n",
+               steps_y, steps_per_sec_y, dir_y);
+
+        if (stepper_motor_move(machine_config.y_motor_id, steps_y, steps_per_sec_y, dir_y))
+        {
+            y_started = true;
+            printf("Y-axis movement started successfully\n");
+        }
+        else
         {
             printf("ERROR: Failed to start Y-axis movement\n");
-            stepper_motor_stop(machine_config.x_motor_id); // Stop X if Y failed
+            // Stop X if Y failed to start
+            if (x_started)
+            {
+                stepper_motor_stop(machine_config.x_motor_id);
+                printf("Stopped X-axis due to Y-axis failure\n");
+            }
             success = false;
         }
+    }
+    else if (steps_y == 0)
+    {
+        printf("Y-axis: No movement needed\n");
+    }
+
+    if (success)
+    {
+        printf("Movement execution started successfully\n");
+    }
+    else
+    {
+        printf("Movement execution failed\n");
     }
 
     return success;

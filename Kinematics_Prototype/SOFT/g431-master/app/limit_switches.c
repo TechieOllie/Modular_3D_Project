@@ -35,12 +35,13 @@ bool limit_switches_init(void)
     // Clear all configurations
     memset(limit_switches, 0, sizeof(limit_switches));
 
-// Initialize EXTI system if not already done
+    // Initialize EXTI system if not already done
 #if USE_BSP_EXTIT
-// EXTI system should be initialized by the BSP
+    // EXTI system should be initialized by the BSP
+    printf("EXTI system enabled\n");
 #else
     printf("Warning: EXTI system not enabled in config.h\n");
-    return false;
+    // Continue anyway for basic functionality without interrupts
 #endif
 
     system_initialized = true;
@@ -119,9 +120,11 @@ bool limit_switch_enable(axis_t axis, limit_position_t position, bool enable)
 
     if (enable && !config->enabled)
     {
+#if USE_BSP_EXTIT
         // Enable interrupts for this pin
         BSP_EXTIT_set_callback(limit_switch_interrupt_handler, config->pin_number, true);
         BSP_EXTIT_enable(config->pin_number);
+#endif
         config->enabled = true;
 
         printf("Enabled limit switch: %s_%s\n",
@@ -130,9 +133,11 @@ bool limit_switch_enable(axis_t axis, limit_position_t position, bool enable)
     }
     else if (!enable && config->enabled)
     {
+#if USE_BSP_EXTIT
         // Disable interrupts for this pin
         BSP_EXTIT_disable(config->pin_number);
         BSP_EXTIT_set_callback(NULL, config->pin_number, false);
+#endif
         config->enabled = false;
 
         printf("Disabled limit switch: %s_%s\n",
@@ -367,6 +372,8 @@ static void limit_switch_interrupt_handler(uint8_t pin_number)
         user_callback(axis, position, current_state);
     }
 
+#if USE_BSP_EXTIT
     // Acknowledge the interrupt
     BSP_EXTIT_ack_it(pin_number);
+#endif
 }
