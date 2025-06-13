@@ -9,6 +9,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stepper_motor.h"
+#include "stm32g4xx_hal.h" // Fixed: Added missing include for HAL_GetTick()
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -551,8 +552,8 @@ void stepper_motor_timer_interrupt(timer_id_t timer_id)
             // Increment step counter
             motor->completed_steps++;
 
-            // Debug every 200 steps to avoid flooding
-            if (motor->completed_steps % 200 == 0)
+            // Debug every 500 steps to reduce output
+            if (motor->completed_steps % 500 == 0)
             {
                 printf("Motor %d: Step %lu/%lu (%.1f%%) at %lu Hz\n",
                        i, motor->completed_steps, motor->target_steps,
@@ -568,7 +569,7 @@ void stepper_motor_timer_interrupt(timer_id_t timer_id)
                 motor->state = MOTOR_STATE_IDLE;
                 motor->current_frequency = 0;
 
-                printf("Motor %d COMPLETED in interrupt: %lu steps\n", i, motor->completed_steps);
+                printf("Motor %d COMPLETED: %lu steps\n", i, motor->completed_steps);
                 return;
             }
 

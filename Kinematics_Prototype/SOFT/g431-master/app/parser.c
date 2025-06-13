@@ -275,6 +275,10 @@ static bool execute_g_command(gcode_command_t *cmd)
         printf("Moving to X=%.2f Y=%.2f at F=%.1f\n",
                target_pos.x, target_pos.y, feedrate);
 
+        // Stop any current movement before starting new one
+        kinematics_stop();
+        HAL_Delay(100); // Allow time for stop
+
         // Execute move
         if (!kinematics_move_to(&target_pos, feedrate))
         {
@@ -282,7 +286,8 @@ static bool execute_g_command(gcode_command_t *cmd)
             return false;
         }
 
-        parser_state.current_position = target_pos;
+        // Don't update position here - let kinematics handle it
+        // parser_state.current_position = target_pos;
         break;
     }
 

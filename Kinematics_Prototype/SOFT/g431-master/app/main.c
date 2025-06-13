@@ -13,6 +13,7 @@
 #include "stm32g4_gpio.h"
 #include "stm32g4_uart.h"
 #include "stm32g4_utils.h"
+#include "stm32g4xx_hal.h" // Fixed: Added missing include
 #include <stdio.h>
 #include "stm32g4_adc.h"
 #include "stm32g4_timer.h"
@@ -21,8 +22,7 @@
 #include "stepper_motor.h"
 #include "kinematics.h"
 #include "limit_switches.h"
-
-UART_HandleTypeDef huart2;
+#include "uart_commands.h"
 
 #define BLINK_DELAY 100 // ms
 #define MAX_CMD_LENGTH 128
@@ -34,32 +34,6 @@ UART_HandleTypeDef huart2;
 // UART receive buffer
 static uint8_t uart_rx_buffer[1];
 static volatile bool uart_error = false;
-
-// UART receive callback for G-code processing
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == &huart2)
-    {
-        // Process the received character through the parser
-        parser_process_char((char)uart_rx_buffer[0]);
-
-        // Re-enable UART receive interrupt for next character
-        if (HAL_UART_Receive_IT(&huart2, uart_rx_buffer, 1) != HAL_OK)
-        {
-            uart_error = true;
-        }
-    }
-}
-
-// UART error callback
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == &huart2)
-    {
-        uart_error = true;
-        printf("UART error occurred\n");
-    }
-}
 
 void setup_limit_switches(void)
 {
@@ -82,9 +56,9 @@ void setup_limit_switches(void)
     limit_switch_configure(AXIS_Y, LIMIT_MAX, GPIOB, GPIO_PIN_3, true); // Active low
 
     // Start with limit switches disabled for testing
-    limit_switch_enable(AXIS_X, LIMIT_MIN, false);
+    limit_switch_enable(AXIS_X, LIMIT_MIN, true);
     limit_switch_enable(AXIS_X, LIMIT_MAX, false);
-    limit_switch_enable(AXIS_Y, LIMIT_MIN, false);
+    limit_switch_enable(AXIS_Y, LIMIT_MIN, true);
     limit_switch_enable(AXIS_Y, LIMIT_MAX, false);
 
     printf("Limit switches configured but disabled for testing\n");
@@ -139,8 +113,8 @@ void setup_kinematics(void)
         .max_velocity_y = 50.0f,      // 50 mm/s maximum
         .max_acceleration_x = 100.0f, // 100 mm/s² acceleration
         .max_acceleration_y = 100.0f, // 100 mm/s² acceleration
-        .x_max = 50.0f,               // 50mm working area in X
-        .y_max = 50.0f,               // 50mm working area in Y
+        .x_max = 180.0f,              //  working area in X
+        .y_max = 200.0f,              //  working area in Y
         .x_motor_id = X_MOTOR_ID,
         .y_motor_id = Y_MOTOR_ID};
 
@@ -329,22 +303,6 @@ int main(void)
     BSP_UART_init(UART2_ID, 115200);
     BSP_SYS_set_std_usart(UART2_ID, UART2_ID, UART2_ID);
 
-    // Initialize UART handle directly since BSP_UART_get_handle doesn't exist
-    // The BSP_UART_init should have set up the hardware already
-    huart2.Instance = USART2; // Assuming UART2_ID corresponds to USART2
-    huart2.Init.BaudRate = 115200;
-    huart2.Init.WordLength = UART_WORDLENGTH_8B;
-    huart2.Init.StopBits = UART_STOPBITS_1;
-    huart2.Init.Parity = UART_PARITY_NONE;
-    huart2.Init.Mode = UART_MODE_TX_RX;
-    huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
-
-    if (HAL_UART_Init(&huart2) != HAL_OK)
-    {
-        printf("ERROR: Failed to initialize UART2!\n");
-    }
-
     // Setup limit switches first
     setup_limit_switches();
 
@@ -355,23 +313,15 @@ int main(void)
     // Setup kinematics system
     setup_kinematics();
 
-    // Initialize G-code parser
-    if (!parser_init())
+    // Initialize UART command system
+    if (!uart_commands_init(UART2_ID))
     {
-        printf("ERROR: Failed to initialize G-code parser!\n");
+        printf("ERROR: Failed to initialize UART command system!\n");
         while (1)
-            ; // Stop here if parser fails
+            ; // Stop here if command system fails
     }
 
-    // Enable UART receive interrupt for G-code input
-    if (HAL_UART_Receive_IT(&huart2, uart_rx_buffer, 1) == HAL_OK)
-    {
-        printf("UART receive enabled for G-code input\n");
-    }
-    else
-    {
-        printf("Warning: Could not enable UART receive interrupt, continuing without it\n");
-    }
+    printf("UART command system enabled\n");
 
     // Debug motor configurations before testing
     printf("=== Initial Motor Debug ===\n");
@@ -379,36 +329,29 @@ int main(void)
     stepper_motor_debug_config(Y_MOTOR_ID);
 
     // Wait then run the test
-    HAL_Delay(2000);
-    test_50x50_kinematics();
+    // HAL_Delay(2000);
+    // test_50x50_kinematics();
 
     // Final safety stop
     printf("\n========== TEST COMPLETE ==========\n");
     stepper_motor_emergency_stop_all();
 
     printf("\n========== ENTERING MAIN LOOP ==========\n");
-    printf("Send G-code commands via UART...\n");
+    printf("Send commands via UART (type 'help' for available commands)...\n");
 
     // Main loop
     while (1)
     {
-        // Check for UART errors and restart if needed
-        if (uart_error)
-        {
-            printf("Recovering from UART error...\n");
-            if (HAL_UART_Receive_IT(&huart2, uart_rx_buffer, 1) == HAL_OK)
-            {
-                uart_error = false;
-                printf("UART recovery successful\n");
-            }
-        }
+        // Static variables for timing
+        static uint32_t last_pos_update = 0;
+        static uint32_t last_debug = 0;
 
         // Update systems
+        uart_commands_update(); // Process incoming commands
         kinematics_update();
         stepper_motor_update();
 
         // Update parser position periodically
-        static uint32_t last_pos_update = 0;
         if (HAL_GetTick() - last_pos_update > 100) // Every 100ms
         {
             last_pos_update = HAL_GetTick();
@@ -419,7 +362,6 @@ int main(void)
         HAL_Delay(10);
 
         // Debug output every 5 seconds
-        static uint32_t last_debug = 0;
         if (HAL_GetTick() - last_debug > 5000) // Every 5 seconds
         {
             last_debug = HAL_GetTick();

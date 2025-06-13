@@ -83,6 +83,7 @@ target_sources(
     "app\\main.c"
     "app\\parser.c"
     "app\\stepper_motor.c"
+    "app\\uart_commands.c"
     "core\\Src\\stm32g4xx_it.c"
     "core\\Src\\syscalls.c"
     "core\\Src\\sysmem.c"

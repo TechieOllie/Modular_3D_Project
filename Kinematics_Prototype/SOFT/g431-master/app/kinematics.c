@@ -10,6 +10,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "kinematics.h"
 #include "stepper_motor.h"
+#include "stm32g4xx_hal.h" // Fixed: Added missing include for HAL_GetTick()
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -89,49 +90,114 @@ machine_config_t *kinematics_get_config(void)
 /**
  * @brief Move to absolute position in cartesian coordinates
  */
-bool kinematics_move_to(const position_t *target_pos, float feedrate)
+bool kinematics_move_to(const position_t *target, float feedrate_mm_min)
 {
-    if (!kinematics_initialized || target_pos == NULL)
+    if (!kinematics_initialized || !target)
     {
-        printf("ERROR: Kinematics not initialized or target position is NULL\n");
         return false;
     }
 
     if (current_state != MOVE_STATE_IDLE)
     {
-        printf("ERROR: Machine is busy (state: %d)\n", current_state);
+        printf("Warning: Movement already in progress\n");
         return false;
     }
 
-    if (!kinematics_is_position_valid(target_pos))
-    {
-        printf("ERROR: Target position (%.2f, %.2f) is out of bounds\n", target_pos->x, target_pos->y);
-        return false;
-    }
+    // Calculate movement vector
+    float dx = target->x - current_position.x;
+    float dy = target->y - current_position.y;
+    float distance = sqrtf(dx * dx + dy * dy);
 
-    // Validate feedrate
-    if (feedrate <= 0)
+    if (distance < 0.001f) // Very small movement, ignore
     {
-        feedrate = 600.0f; // Default 600 mm/min
-        printf("WARNING: Invalid feedrate, using default 600 mm/min\n");
-    }
-
-    printf("Moving from (%.2f, %.2f) to (%.2f, %.2f) at %.1f mm/min\n",
-           current_position.x, current_position.y, target_pos->x, target_pos->y, feedrate);
-
-    // Execute the move
-    if (execute_move(&current_position, target_pos, feedrate))
-    {
-        target_position = *target_pos;
-        current_state = MOVE_STATE_MOVING;
-        printf("Move started successfully\n");
+        printf("Movement too small, ignored\n");
         return true;
+    }
+
+    // Calculate movement time based on feedrate
+    float move_time_min = distance / feedrate_mm_min; // Time in minutes
+    float move_time_sec = move_time_min * 60.0f;      // Time in seconds
+
+    // Calculate step counts for each axis
+    uint32_t x_steps = (uint32_t)(fabsf(dx) * machine_config.steps_per_mm_x);
+    uint32_t y_steps = (uint32_t)(fabsf(dy) * machine_config.steps_per_mm_y);
+
+    // Calculate frequencies for each motor to complete move in same time
+    uint32_t x_freq = 0;
+    uint32_t y_freq = 0;
+
+    if (x_steps > 0 && move_time_sec > 0.001f)
+    {
+        x_freq = (uint32_t)(x_steps / move_time_sec);
+        if (x_freq < STEPPER_MIN_FREQUENCY)
+            x_freq = STEPPER_MIN_FREQUENCY;
+        if (x_freq > STEPPER_MAX_FREQUENCY)
+            x_freq = STEPPER_MAX_FREQUENCY;
+    }
+
+    if (y_steps > 0 && move_time_sec > 0.001f)
+    {
+        y_freq = (uint32_t)(y_steps / move_time_sec);
+        if (y_freq < STEPPER_MIN_FREQUENCY)
+            y_freq = STEPPER_MIN_FREQUENCY;
+        if (y_freq > STEPPER_MAX_FREQUENCY)
+            y_freq = STEPPER_MAX_FREQUENCY;
+    }
+
+    printf("Coordinated move: dx=%.2f dy=%.2f, dist=%.2f, time=%.2fs\n",
+           dx, dy, distance, move_time_sec);
+    printf("Steps: X=%lu@%luHz, Y=%lu@%luHz\n",
+           x_steps, x_freq, y_steps, y_freq);
+
+    // Determine directions
+    stepper_motor_dir_t x_dir = (dx >= 0) ? MOTOR_DIR_CLOCKWISE : MOTOR_DIR_COUNTERCLOCKWISE;
+    stepper_motor_dir_t y_dir = (dy >= 0) ? MOTOR_DIR_CLOCKWISE : MOTOR_DIR_COUNTERCLOCKWISE;
+
+    // Store target for tracking
+    target_position = *target;
+    current_state = MOVE_STATE_MOVING;
+
+    // Start both motors simultaneously
+    bool x_started = false;
+    bool y_started = false;
+
+    if (x_steps > 0)
+    {
+        x_started = stepper_motor_move_accel(machine_config.x_motor_id, x_steps, x_freq, x_dir);
+        if (!x_started)
+        {
+            printf("Failed to start X motor\n");
+        }
     }
     else
     {
-        printf("Failed to start move\n");
+        x_started = true; // No X movement needed
+    }
+
+    if (y_steps > 0)
+    {
+        y_started = stepper_motor_move_accel(machine_config.y_motor_id, y_steps, y_freq, y_dir);
+        if (!y_started)
+        {
+            printf("Failed to start Y motor\n");
+        }
+    }
+    else
+    {
+        y_started = true; // No Y movement needed
+    }
+
+    if (!x_started || !y_started)
+    {
+        // Stop any motors that did start
+        stepper_motor_stop(machine_config.x_motor_id);
+        stepper_motor_stop(machine_config.y_motor_id);
+        current_state = MOVE_STATE_IDLE;
         return false;
     }
+
+    printf("Both motors started successfully\n");
+    return true;
 }
 
 /**
@@ -287,35 +353,70 @@ void kinematics_update(void)
         return;
     }
 
-    if (current_state == MOVE_STATE_MOVING)
+    static uint32_t last_update = 0;
+    uint32_t now = HAL_GetTick();
+
+    // Update every 50ms
+    if (now - last_update < 50)
     {
-        // Check if both motors have finished moving
+        return;
+    }
+    last_update = now;
+
+    switch (current_state)
+    {
+    case MOVE_STATE_MOVING:
+    {
+        // Check if both motors have completed their moves
         stepper_motor_state_t x_state = stepper_motor_get_state(machine_config.x_motor_id);
         stepper_motor_state_t y_state = stepper_motor_get_state(machine_config.y_motor_id);
 
-        // Debug motor states periodically
+        bool x_done = (x_state == MOTOR_STATE_IDLE);
+        bool y_done = (y_state == MOTOR_STATE_IDLE);
+
+        // Debug output every 1 second during movement
         static uint32_t last_debug = 0;
-        if (HAL_GetTick() - last_debug > 1000) // Every 1 second
+        if (now - last_debug > 1000)
         {
-            last_debug = HAL_GetTick();
-            printf("Kinematics update: X_state=%d, Y_state=%d\n", x_state, y_state);
+            last_debug = now;
+            uint32_t x_completed = stepper_motor_get_completed_steps(machine_config.x_motor_id);
+            uint32_t y_completed = stepper_motor_get_completed_steps(machine_config.y_motor_id);
+            printf("Movement progress - X: %lu steps (state %d), Y: %lu steps (state %d)\n",
+                   x_completed, x_state, y_completed, y_state);
         }
+
+        // If both motors are done, update position and state
+        if (x_done && y_done)
+        {
+            current_position = target_position;
+            current_state = MOVE_STATE_IDLE;
+            printf("Coordinated movement completed - Position: X=%.2f Y=%.2f\n",
+                   current_position.x, current_position.y);
+        }
+        break;
+    }
+
+    case MOVE_STATE_HOMING:
+    {
+        // Update homing state
+        stepper_motor_state_t x_state = stepper_motor_get_state(machine_config.x_motor_id);
+        stepper_motor_state_t y_state = stepper_motor_get_state(machine_config.y_motor_id);
 
         if (x_state == MOTOR_STATE_IDLE && y_state == MOTOR_STATE_IDLE)
         {
-            // Movement complete - update current position to target
-            current_position = target_position;
+            current_position.x = 0.0f;
+            current_position.y = 0.0f;
+            target_position = current_position;
             current_state = MOVE_STATE_IDLE;
+            printf("Homing completed\n");
+        }
+        break;
+    }
 
-            printf("Move completed - position: X=%.2f, Y=%.2f\n",
-                   current_position.x, current_position.y);
-        }
-        else if (x_state == MOTOR_STATE_ERROR || y_state == MOTOR_STATE_ERROR)
-        {
-            // Handle error state
-            printf("Motor error detected - stopping movement\n");
-            kinematics_stop();
-        }
+    case MOVE_STATE_IDLE:
+    default:
+        // Nothing to do in idle state
+        break;
     }
 }
 
