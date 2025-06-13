@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file    limit_switches_demo.c
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
  * @brief   Demo application for limit switches functionality
  *******************************************************************************

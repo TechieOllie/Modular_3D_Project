@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file 	config.h
- * @author 	naej
+ * @author  Ol, naej, Fabs
  * @date 	Avr 29, 2025
  * @brief	Fichier principal de configuration de votre projet sur carte Nucléo STM32G431KB.
  * 			Permet d'activer les différents modules logiciels à votre disposition.
@@ -41,34 +41,34 @@
 #define USE_DAC 0
 
 /*------------------Afficheurs------------------*/
-#define USE_ILI9341 0 // Écran TFT (disabled for CNC)
+#define USE_ILI9341 0 // Écran TFT
 #define USE_XPT2046 0
 #define USE_FONT7x10 0
 #define USE_FONT11x18 0
 #define USE_FONT16x26 0
 
-#define USE_EPAPER 0 // e-paper (disabled for CNC)
-#define USE_WS2812 0 // Matrice de led (disabled for CNC)
+#define USE_EPAPER 0 // e-paper
+#define USE_WS2812 0 // Matrice de led
 
 /*------------------Capteurs------------------*/
-#define USE_MPU6050 0		  // Accéléromètre, Gyroscope
-#define USE_APDS9960 0		  // Capteur de mouvements, présence, couleurs
-#define USE_BMP180 0		  // Capteur de pression atmosphérique
-#define USE_BH1750FVI 0		  // Capteur de luminosité ambiante
-#define USE_DHT11 0			  // Capteur de température et d'humidité
-#define USE_DS18B20 0		  // Sonde de température
-#define USE_YX6300 0		  // Lecteur MP3
+#define USE_MPU6050 0         // Accéléromètre, Gyroscope
+#define USE_APDS9960 0        // Capteur de mouvements, présence, couleurs
+#define USE_BMP180 0          // Capteur de pression atmosphérique
+#define USE_BH1750FVI 0       // Capteur de luminosité ambiante
+#define USE_DHT11 0           // Capteur de température et d'humidité
+#define USE_DS18B20 0         // Sonde de température
+#define USE_YX6300 0          // Lecteur MP3
 #define USE_MATRIX_KEYBOARD 0 // Clavier matriciel
-#define USE_HCSR04 0		  // Télémètre à ultrason
-#define USE_GPS 0			  // GPS
-#define USE_LD19 0			  // Lidar
-#define USE_NFC03A1 0		  // Shield NFC
-#define USE_VL53L0 0		  // Télémètre laser
+#define USE_HCSR04 0          // Télémètre à ultrason
+#define USE_GPS 0             // GPS
+#define USE_LD19 0            // Lidar
+#define USE_NFC03A1 0         // Shield NFC
+#define USE_VL53L0 0          // Télémètre laser
 
 /*------------------Expanders------------------*/
-#define USE_MCP23017 0 // GPIO expander (disabled for CNC)
-#define USE_MCP23S17 0 // GPIO expander (disabled for CNC)
-#define USE_SD_CARD 0  // Carte SD (disabled for now)
+#define USE_MCP23017 0 // GPIO expander
+#define USE_MCP23S17 0 // GPIO expander
+#define USE_SD_CARD 0  // Carte SD
 
 /*------------------Actionneurs------------------*/
 #define USE_MOTOR_DC 0

@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file    parser.c
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
  * @brief   G-code parser for 3D printer/CNC control system
  *******************************************************************************

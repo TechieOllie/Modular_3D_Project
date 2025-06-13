@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file    kinematics.h
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
  * @brief   Cartesian flying gantry kinematics for 2-axis CNC system
  *******************************************************************************

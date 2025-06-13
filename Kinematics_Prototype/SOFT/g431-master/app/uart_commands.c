@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file    uart_commands.c
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
  * @brief   UART command handling for G-code and special commands
  *******************************************************************************

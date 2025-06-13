@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file    limit_switches.h
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
  * @brief   Limit switches management for 3D printer axes
  *******************************************************************************

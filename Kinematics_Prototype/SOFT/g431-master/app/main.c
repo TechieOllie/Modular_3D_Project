@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file 	main.c
- * @author 	naej, ol, your name
+ * @author 	Ol, naej, Fabs
  * @date 	Current Date
  * @brief	Main application for CNC control system with cartesian kinematics
  *******************************************************************************
@@ -13,7 +13,7 @@
 #include "stm32g4_gpio.h"
 #include "stm32g4_uart.h"
 #include "stm32g4_utils.h"
-#include "stm32g4xx_hal.h" // Fixed: Added missing include
+#include "stm32g4xx_hal.h"
 #include <stdio.h>
 #include "stm32g4_adc.h"
 #include "stm32g4_timer.h"
@@ -56,9 +56,9 @@ void setup_limit_switches(void)
     limit_switch_configure(AXIS_Y, LIMIT_MAX, GPIOB, GPIO_PIN_3, true); // Active low
 
     // Start with limit switches disabled for testing
-    limit_switch_enable(AXIS_X, LIMIT_MIN, true);
+    limit_switch_enable(AXIS_X, LIMIT_MIN, false);
     limit_switch_enable(AXIS_X, LIMIT_MAX, false);
-    limit_switch_enable(AXIS_Y, LIMIT_MIN, true);
+    limit_switch_enable(AXIS_Y, LIMIT_MIN, false);
     limit_switch_enable(AXIS_Y, LIMIT_MAX, false);
 
     printf("Limit switches configured but disabled for testing\n");
@@ -113,8 +113,8 @@ void setup_kinematics(void)
         .max_velocity_y = 50.0f,      // 50 mm/s maximum
         .max_acceleration_x = 100.0f, // 100 mm/s² acceleration
         .max_acceleration_y = 100.0f, // 100 mm/s² acceleration
-        .x_max = 180.0f,              //  working area in X
-        .y_max = 200.0f,              //  working area in Y
+        .x_max = 210.0f,              //  working area in X
+        .y_max = 170.0f,              //  working area in Y
         .x_motor_id = X_MOTOR_ID,
         .y_motor_id = Y_MOTOR_ID};
 
@@ -306,7 +306,7 @@ int main(void)
     // Setup limit switches first
     setup_limit_switches();
 
-    // Setup stepper motors (now with limit switch integration)
+    // Setup stepper motors
     setup_stepper_motors();
     printf("Stepper motors initialized.\n");
 
@@ -329,8 +329,8 @@ int main(void)
     stepper_motor_debug_config(Y_MOTOR_ID);
 
     // Wait then run the test
-    // HAL_Delay(2000);
-    // test_50x50_kinematics();
+    HAL_Delay(2000);
+    test_50x50_kinematics();
 
     // Final safety stop
     printf("\n========== TEST COMPLETE ==========\n");

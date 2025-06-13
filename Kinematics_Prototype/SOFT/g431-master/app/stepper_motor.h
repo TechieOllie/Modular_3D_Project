@@ -1,7 +1,7 @@
 /**
  *******************************************************************************
  * @file    stepper_motor.h
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
  * @brief   Stepper motor control with timer interrupts and acceleration profiles
  *******************************************************************************

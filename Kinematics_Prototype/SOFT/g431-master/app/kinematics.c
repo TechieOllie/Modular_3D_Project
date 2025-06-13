@@ -1,9 +1,9 @@
 /**
  *******************************************************************************
  * @file    kinematics.c
- * @author  GitHub Copilot
+ * @author  Ol, naej, Fabs
  * @date    May 27, 2025
- * @brief   Cartesian flying gantry kinematics implementation
+ * @brief   Cartesian gantry kinematics implementation
  *******************************************************************************
  */
 
