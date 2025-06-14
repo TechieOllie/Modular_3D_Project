@@ -26,7 +26,7 @@ static uart_cmd_stats_t stats = {0};
 static char line_buffer[UART_CMD_MAX_LINE_LENGTH];
 static uint16_t line_index = 0;
 static bool line_ready = false;
-static uint32_t last_char_time = 0; // Fixed: Added missing semicolon
+static uint32_t last_char_time = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 static void process_special_command(const char *line);
@@ -65,12 +65,11 @@ bool uart_commands_init(uart_id_t uart_id_param)
     BSP_UART_set_callback(uart_id, uart_rx_callback);
 
     printf("UART commands initialized on UART%d\n", uart_id + 1);
-    printf("Testing UART output...\n");
 
     // Test UART output
-    uart_commands_send_response("// UART Command System Ready");
-    uart_commands_send_response("// Send 'help' for available commands");
-    uart_commands_send_response("// Debug mode enabled");
+    uart_commands_send_response("-- UART Command System Ready");
+    uart_commands_send_response("-- Send 'help' for available commands");
+    uart_commands_send_response("-- Type 'M112' or 'stop' for emergency stop");
 
     return true;
 }
@@ -81,7 +80,6 @@ bool uart_commands_init(uart_id_t uart_id_param)
 static void uart_rx_callback(void)
 {
     // This function is called from BSP UART interrupt
-    // We'll process characters in the update function instead
 }
 
 /**
@@ -351,7 +349,7 @@ void uart_commands_emergency_stop(void)
 {
     stepper_motor_emergency_stop_all();
     kinematics_stop();
-    uart_commands_send_response("// EMERGENCY STOP ACTIVATED");
+    uart_commands_send_response("---- EMERGENCY STOP ACTIVATED ----");
 }
 
 /**

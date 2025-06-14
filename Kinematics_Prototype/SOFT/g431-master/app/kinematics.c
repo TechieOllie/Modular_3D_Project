@@ -239,15 +239,45 @@ bool kinematics_home_all(void)
     printf("Starting homing sequence for all axes\n");
     current_state = MOVE_STATE_HOMING;
 
-    // For now, just set position to origin
-    // In a real implementation, you would move to limit switches
+    // Home Y axis first (safer to home Y first)
+    printf(" Homing Y-axis...\n");
+    if (!stepper_motor_home_precision(machine_config.y_motor_id, 2000, 400)) // 2kHz fast, 400Hz slow
+    {
+        printf("ERROR: Failed to start Y axis homing\n");
+        current_state = MOVE_STATE_IDLE;
+        return false;
+    }
+
+    while (stepper_motor_get_state(machine_config.y_motor_id) != MOTOR_STATE_IDLE)
+    {
+        stepper_motor_update();
+        HAL_Delay(10);
+    }
+    printf("Y axis homing complete\n");
+
+    // Home X axis next
+    printf("Homing X-axis...\n");
+    if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400)) // 2kHz fast, 400Hz slow
+    {
+        printf("ERROR: Failed to start X axis homing\n");
+        current_state = MOVE_STATE_IDLE;
+        return false;
+    }
+
+    while (stepper_motor_get_state(machine_config.x_motor_id) != MOTOR_STATE_IDLE)
+    {
+        stepper_motor_update();
+        HAL_Delay(10);
+    }
+    printf("X axis homing complete\n");
+
+    // Set current position to origin after homing
     current_position.x = 0.0f;
     current_position.y = 0.0f;
-    target_position.x = 0.0f;
-    target_position.y = 0.0f;
+    target_position = current_position;
 
     current_state = MOVE_STATE_IDLE;
-    printf("Homing complete - position set to origin\n");
+    printf("Homing complete\n");
 
     return true;
 }
@@ -271,15 +301,40 @@ bool kinematics_home_axis(char axis)
     printf("Homing %c axis\n", axis);
     current_state = MOVE_STATE_HOMING;
 
-    // For now, just set the specific axis to origin
     if (axis == 'X' || axis == 'x')
     {
-        current_position.x = 0.0f;
+        if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400))
+        {
+            printf("ERROR: Failed to home X axis\n");
+            current_state = MOVE_STATE_IDLE;
+            return false;
+        }
+
+        while (stepper_motor_get_state(machine_config.x_motor_id) != MOTOR_STATE_IDLE)
+        {
+            stepper_motor_update();
+            HAL_Delay(10); // Wait for X motor to finish homing
+        }
+
+        current_position.x = 0.0f; // Reset position after homing
         target_position.x = 0.0f;
     }
     else if (axis == 'Y' || axis == 'y')
     {
-        current_position.y = 0.0f;
+        if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400))
+        {
+            printf("ERROR: Failed to home Y axis\n");
+            current_state = MOVE_STATE_IDLE;
+            return false;
+        }
+
+        while (stepper_motor_get_state(machine_config.y_motor_id) != MOTOR_STATE_IDLE)
+        {
+            stepper_motor_update();
+            HAL_Delay(10); // Wait for Y motor to finish homing
+        }
+
+        current_position.y = 0.0f; // Reset position after homing
         target_position.y = 0.0f;
     }
     else
