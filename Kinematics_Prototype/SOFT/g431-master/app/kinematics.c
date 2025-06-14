@@ -355,7 +355,7 @@ bool kinematics_home_axis(char axis)
  */
 position_t kinematics_get_position(void)
 {
-    return current_position;
+    return &current_position;
 }
 
 /**
@@ -376,7 +376,7 @@ void kinematics_set_position(const position_t *pos)
  */
 move_state_t kinematics_get_state(void)
 {
-    return current_state;
+    return &current_state;
 }
 
 /**
