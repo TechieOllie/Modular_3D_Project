@@ -375,6 +375,39 @@ void stepper_motor_update(void)
                 continue;
             }
 
+            if (motor->state == MOTOR_STATE_HOMING)
+            {
+                // Check limit switches during homing
+                if (motor->limit_check_enabled && check_limit_switches(motor))
+                {
+                    if (motor->homing_phase == 1)
+                    {
+                        // Fast phase hit limit - start phase 2 (back off)
+                        printf("Motor %d: Fast homing complete, starting precision phase\n", i);
+                        start_precision_homing_phase2(motor, i);
+                        continue;
+                    }
+                    else if (motor->homing_phase == 3)
+                    {
+                        // Slow precision phase hit limit - homing complete
+                        printf("Motor %d: Precision homing complete\n", i);
+                        stop_motor_timer(motor);
+                        motor->state = MOTOR_STATE_IDLE;
+                        motor->current_frequency = 0;
+                        motor->homing_phase = 0;
+                        continue;
+                    }
+                }
+
+                // Handle phase 2 completion (backing off)
+                if (motor->homing_phase == 2 && motor->completed_steps >= motor->target_steps)
+                {
+                    printf("Motor %d: Back-off complete, starting slow approach\n", i);
+                    start_precision_homing_phase3(motor, i);
+                    continue;
+                }
+            }
+
             // Check limit switches during movement
             if (motor->limit_check_enabled && check_limit_switches(motor))
             {
@@ -416,9 +449,13 @@ void stepper_motor_enable_limit_check(uint8_t motor_id, bool enable)
 }
 
 /**
- * @brief Home motor (move until limit switch triggered)
+ * @brief Home motor with two-speed precision homing
+ * @param motor_id Motor ID
+ * @param fast_frequency Fast homing frequency in Hz (e.g., 2000)
+ * @param slow_frequency Slow precision frequency in Hz (e.g., 500)
+ * @return true if homing started successfully
  */
-bool stepper_motor_home(uint8_t motor_id, uint32_t frequency)
+bool stepper_motor_home_precision(uint8_t motor_id, uint32_t fast_frequency, uint32_t slow_frequency)
 {
     if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
     {
@@ -433,6 +470,11 @@ bool stepper_motor_home(uint8_t motor_id, uint32_t frequency)
         return false;
     }
 
+    // Store homing parameters for the two-phase process
+    motor->homing_fast_freq = fast_frequency;
+    motor->homing_slow_freq = slow_frequency;
+    motor->homing_phase = 1; // Start with phase 1 (fast)
+
     // Enable limit checking for homing
     bool old_limit_setting = motor->limit_check_enabled;
     motor->limit_check_enabled = true;
@@ -443,14 +485,68 @@ bool stepper_motor_home(uint8_t motor_id, uint32_t frequency)
 
     HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_SET); // CCW
 
-    // Start continuous movement at homing speed
+    // Start fast homing phase
     motor->target_steps = 0xFFFFFFFF; // Large number for continuous movement
     motor->completed_steps = 0;
-    motor->current_frequency = frequency;
+    motor->current_frequency = fast_frequency;
 
-    set_motor_frequency(motor, frequency);
+    set_motor_frequency(motor, fast_frequency);
 
-    printf("Motor %d: Homing started at %lu Hz\n", motor_id, frequency);
+    printf("Motor %d: Precision homing started - Phase 1 (fast) at %lu Hz\n", motor_id, fast_frequency);
+
+    return true;
+}
+
+/**
+ * @brief Continue with slow precision homing phase
+ */
+static bool start_precision_homing_phase2(stepper_motor_t *motor, uint8_t motor_id)
+{
+    printf("Motor %d: Starting precision homing Phase 2 (slow)\n", motor_id);
+
+    // Stop current movement
+    stop_motor_timer(motor);
+    HAL_Delay(100); // Brief pause between phases
+
+    // Back off from limit switch (move away a small distance)
+    motor->direction = MOTOR_DIR_CLOCKWISE;                             // Away from limit
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_RESET); // CW
+
+    // Move away from limit switch slowly
+    motor->target_steps = 200; // Back off ~2.5mm at 80 steps/mm
+    motor->completed_steps = 0;
+    motor->current_frequency = motor->homing_slow_freq;
+    motor->homing_phase = 2; // Phase 2: backing off
+
+    set_motor_frequency(motor, motor->homing_slow_freq);
+
+    printf("Motor %d: Backing off from limit switch\n", motor_id);
+
+    return true;
+}
+
+/**
+ * @brief Start final slow approach to limit switch
+ */
+static bool start_precision_homing_phase3(stepper_motor_t *motor, uint8_t motor_id)
+{
+    printf("Motor %d: Starting precision homing Phase 3 (slow approach)\n", motor_id);
+
+    // Brief pause
+    HAL_Delay(100);
+
+    // Now approach limit switch slowly for precision
+    motor->direction = MOTOR_DIR_COUNTERCLOCKWISE;                    // Back toward limit
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_SET); // CCW
+
+    motor->target_steps = 0xFFFFFFFF; // Continuous until limit hit
+    motor->completed_steps = 0;
+    motor->current_frequency = motor->homing_slow_freq;
+    motor->homing_phase = 3; // Phase 3: slow precision approach
+
+    set_motor_frequency(motor, motor->homing_slow_freq);
+
+    printf("Motor %d: Slow precision approach at %lu Hz\n", motor_id, motor->homing_slow_freq);
 
     return true;
 }

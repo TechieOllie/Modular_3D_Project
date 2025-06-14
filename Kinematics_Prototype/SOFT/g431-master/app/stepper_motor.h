@@ -83,6 +83,11 @@ typedef struct
     axis_t axis;
     bool limit_check_enabled;
 
+    // Precision homing support
+    uint32_t homing_fast_freq;
+    uint32_t homing_slow_freq;
+    uint8_t homing_phase; // 1=fast, 2=backing off, 3=slow approach
+
     // State
     stepper_motor_state_t state;
     stepper_motor_dir_t direction;
@@ -215,12 +220,13 @@ void stepper_motor_set_axis(uint8_t motor_id, axis_t axis);
 void stepper_motor_enable_limit_check(uint8_t motor_id, bool enable);
 
 /**
- * @brief Home motor (move until limit switch triggered)
+ * @brief Home motor with two-speed precision homing
  * @param motor_id Motor ID
- * @param frequency Homing frequency in Hz
+ * @param fast_frequency Fast homing frequency in Hz (e.g., 2000)
+ * @param slow_frequency Slow precision frequency in Hz (e.g., 500)
  * @return true if homing started successfully
  */
-bool stepper_motor_home(uint8_t motor_id, uint32_t frequency);
+bool stepper_motor_home_precision(uint8_t motor_id, uint32_t fast_frequency, uint32_t slow_frequency);
 
 /**
  * @brief Move motor with limit checking
