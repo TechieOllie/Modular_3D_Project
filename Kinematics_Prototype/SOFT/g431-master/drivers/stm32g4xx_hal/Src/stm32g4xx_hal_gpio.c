@@ -106,30 +106,30 @@
 #include "stm32g4xx_hal.h"
 
 /** @addtogroup STM32G4xx_HAL_Driver
-  * @{
-  */
+ * @{
+ */
 
 /** @addtogroup GPIO
-  * @{
-  */
+ * @{
+ */
 /** MISRA C:2012 deviation rule has been granted for following rules:
-  * Rule-12.2 - Medium: RHS argument is in interval [0,INF] which is out of
-  * range of the shift operator in following API :
-  * HAL_GPIO_Init
-  * HAL_GPIO_DeInit
-  */
+ * Rule-12.2 - Medium: RHS argument is in interval [0,INF] which is out of
+ * range of the shift operator in following API :
+ * HAL_GPIO_Init
+ * HAL_GPIO_DeInit
+ */
 
 #ifdef HAL_GPIO_MODULE_ENABLED
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private defines -----------------------------------------------------------*/
 /** @addtogroup GPIO_Private_Constants GPIO Private Constants
-  * @{
-  */
-#define GPIO_NUMBER           (16U)
+ * @{
+ */
+#define GPIO_NUMBER (16U)
 /**
-  * @}
-  */
+ * @}
+ */
 
 /* Private macros ------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
@@ -137,8 +137,8 @@
 /* Exported functions --------------------------------------------------------*/
 
 /** @addtogroup GPIO_Exported_Functions
-  * @{
-  */
+ * @{
+ */
 
 /** @defgroup GPIO_Exported_Functions_Group1 Initialization/de-initialization functions
   *  @brief    Initialization and Configuration functions
@@ -153,13 +153,13 @@
   */
 
 /**
-  * @brief  Initialize the GPIOx peripheral according to the specified parameters in the GPIO_Init.
-  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
-  * @param  GPIO_Init pointer to a GPIO_InitTypeDef structure that contains
-  *         the configuration information for the specified GPIO peripheral.
-  * @retval None
-  */
-void HAL_GPIO_Init(GPIO_TypeDef  *GPIOx, GPIO_InitTypeDef *GPIO_Init)
+ * @brief  Initialize the GPIOx peripheral according to the specified parameters in the GPIO_Init.
+ * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
+ * @param  GPIO_Init pointer to a GPIO_InitTypeDef structure that contains
+ *         the configuration information for the specified GPIO peripheral.
+ * @retval None
+ */
+void HAL_GPIO_Init(GPIO_TypeDef *GPIOx, GPIO_InitTypeDef *GPIO_Init)
 {
   uint32_t position = 0x00U;
   uint32_t iocurrent;
@@ -180,8 +180,8 @@ void HAL_GPIO_Init(GPIO_TypeDef  *GPIOx, GPIO_InitTypeDef *GPIO_Init)
     {
       /*--------------------- GPIO Mode Configuration ------------------------*/
       /* In case of Output or Alternate function mode selection */
-      if(((GPIO_Init->Mode & GPIO_MODE) == MODE_OUTPUT) ||
-         ((GPIO_Init->Mode & GPIO_MODE) == MODE_AF))
+      if (((GPIO_Init->Mode & GPIO_MODE) == MODE_OUTPUT) ||
+          ((GPIO_Init->Mode & GPIO_MODE) == MODE_AF))
       {
         /* Check the Speed parameter */
         assert_param(IS_GPIO_SPEED(GPIO_Init->Speed));
@@ -193,7 +193,7 @@ void HAL_GPIO_Init(GPIO_TypeDef  *GPIOx, GPIO_InitTypeDef *GPIO_Init)
 
         /* Configure the IO Output Type */
         temp = GPIOx->OTYPER;
-        temp &= ~(GPIO_OTYPER_OT0 << position) ;
+        temp &= ~(GPIO_OTYPER_OT0 << position);
         temp |= (((GPIO_Init->Mode & OUTPUT_TYPE) >> OUTPUT_TYPE_Pos) << position);
         GPIOx->OTYPER = temp;
       }
@@ -283,13 +283,13 @@ void HAL_GPIO_Init(GPIO_TypeDef  *GPIOx, GPIO_InitTypeDef *GPIO_Init)
 }
 
 /**
-  * @brief  De-initialize the GPIOx peripheral registers to their default reset values.
-  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
-  * @param  GPIO_Pin specifies the port bit to be written.
-  *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
-  * @retval None
-  */
-void HAL_GPIO_DeInit(GPIO_TypeDef  *GPIOx, uint32_t GPIO_Pin)
+ * @brief  De-initialize the GPIOx peripheral registers to their default reset values.
+ * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
+ * @param  GPIO_Pin specifies the port bit to be written.
+ *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
+ * @retval None
+ */
+void HAL_GPIO_DeInit(GPIO_TypeDef *GPIOx, uint32_t GPIO_Pin)
 {
   uint32_t position = 0x00U;
   uint32_t iocurrent;
@@ -337,7 +337,7 @@ void HAL_GPIO_DeInit(GPIO_TypeDef  *GPIOx, uint32_t GPIO_Pin)
       GPIOx->PUPDR &= ~(GPIO_PUPDR_PUPD0 << (position * 2u));
 
       /* Configure the default value IO Output Type */
-      GPIOx->OTYPER  &= ~(GPIO_OTYPER_OT0 << position);
+      GPIOx->OTYPER &= ~(GPIO_OTYPER_OT0 << position);
 
       /* Configure the default value for IO Speed */
       GPIOx->OSPEEDR &= ~(GPIO_OSPEEDR_OSPEED0 << (position * 2u));
@@ -348,8 +348,8 @@ void HAL_GPIO_DeInit(GPIO_TypeDef  *GPIOx, uint32_t GPIO_Pin)
 }
 
 /**
-  * @}
-  */
+ * @}
+ */
 
 /** @addtogroup GPIO_Exported_Functions_Group2
   *  @brief GPIO Read, Write, Toggle, Lock and EXTI management functions.
@@ -364,12 +364,12 @@ void HAL_GPIO_DeInit(GPIO_TypeDef  *GPIOx, uint32_t GPIO_Pin)
   */
 
 /**
-  * @brief  Read the specified input port pin.
-  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
-  * @param  GPIO_Pin specifies the port bit to read.
-  *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
-  * @retval The input port pin value.
-  */
+ * @brief  Read the specified input port pin.
+ * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
+ * @param  GPIO_Pin specifies the port bit to read.
+ *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
+ * @retval The input port pin value.
+ */
 GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 {
   GPIO_PinState bitstatus;
@@ -389,21 +389,21 @@ GPIO_PinState HAL_GPIO_ReadPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 }
 
 /**
-  * @brief  Set or clear the selected data port bit.
-  *
-  * @note   This function uses GPIOx_BSRR and GPIOx_BRR registers to allow atomic read/modify
-  *         accesses. In this way, there is no risk of an IRQ occurring between
-  *         the read and the modify access.
-  *
-  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
-  * @param  GPIO_Pin specifies the port bit to be written.
-  *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
-  * @param  PinState specifies the value to be written to the selected bit.
-  *         This parameter can be one of the GPIO_PinState enum values:
-  *            @arg GPIO_PIN_RESET: to clear the port pin
-  *            @arg GPIO_PIN_SET: to set the port pin
-  * @retval None
-  */
+ * @brief  Set or clear the selected data port bit.
+ *
+ * @note   This function uses GPIOx_BSRR and GPIOx_BRR registers to allow atomic read/modify
+ *         accesses. In this way, there is no risk of an IRQ occurring between
+ *         the read and the modify access.
+ *
+ * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
+ * @param  GPIO_Pin specifies the port bit to be written.
+ *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
+ * @param  PinState specifies the value to be written to the selected bit.
+ *         This parameter can be one of the GPIO_PinState enum values:
+ *            @arg GPIO_PIN_RESET: to clear the port pin
+ *            @arg GPIO_PIN_SET: to set the port pin
+ * @retval None
+ */
 void HAL_GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState PinState)
 {
   /* Check the parameters */
@@ -421,12 +421,12 @@ void HAL_GPIO_WritePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin, GPIO_PinState Pin
 }
 
 /**
-  * @brief  Toggle the specified GPIO pin.
-  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
-  * @param  GPIO_Pin specifies the pin to be toggled.
-  *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
-  * @retval None
-  */
+ * @brief  Toggle the specified GPIO pin.
+ * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
+ * @param  GPIO_Pin specifies the pin to be toggled.
+ *         This parameter can be any combination of GPIO_PIN_x where x can be (0..15).
+ * @retval None
+ */
 void HAL_GPIO_TogglePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 {
   uint32_t odr;
@@ -442,16 +442,16 @@ void HAL_GPIO_TogglePin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 }
 
 /**
-  * @brief  Lock GPIO Pins configuration registers.
-  * @note   The locked registers are GPIOx_MODER, GPIOx_OTYPER, GPIOx_OSPEEDR,
-  *         GPIOx_PUPDR, GPIOx_AFRL and GPIOx_AFRH.
-  * @note   The configuration of the locked GPIO pins can no longer be modified
-  *         until the next reset.
-  * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
-  * @param  GPIO_Pin specifies the port bits to be locked.
-  *         This parameter can be any combination of GPIO_Pin_x where x can be (0..15).
-  * @retval None
-  */
+ * @brief  Lock GPIO Pins configuration registers.
+ * @note   The locked registers are GPIOx_MODER, GPIOx_OTYPER, GPIOx_OSPEEDR,
+ *         GPIOx_PUPDR, GPIOx_AFRL and GPIOx_AFRH.
+ * @note   The configuration of the locked GPIO pins can no longer be modified
+ *         until the next reset.
+ * @param  GPIOx where x can be (A..G) to select the GPIO peripheral for STM32G4xx family
+ * @param  GPIO_Pin specifies the port bits to be locked.
+ *         This parameter can be any combination of GPIO_Pin_x where x can be (0..15).
+ * @retval None
+ */
 HAL_StatusTypeDef HAL_GPIO_LockPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 {
   __IO uint32_t tmp = GPIO_LCKR_LCKK;
@@ -483,10 +483,10 @@ HAL_StatusTypeDef HAL_GPIO_LockPin(GPIO_TypeDef *GPIOx, uint16_t GPIO_Pin)
 }
 
 /**
-  * @brief  Handle EXTI interrupt request.
-  * @param  GPIO_Pin Specifies the port pin connected to corresponding EXTI line.
-  * @retval None
-  */
+ * @brief  Handle EXTI interrupt request.
+ * @param  GPIO_Pin Specifies the port pin connected to corresponding EXTI line.
+ * @retval None
+ */
 void HAL_GPIO_EXTI_IRQHandler(uint16_t GPIO_Pin)
 {
   /* EXTI line interrupt detected */
@@ -498,10 +498,10 @@ void HAL_GPIO_EXTI_IRQHandler(uint16_t GPIO_Pin)
 }
 
 /**
-  * @brief  EXTI line detection callback.
-  * @param  GPIO_Pin: Specifies the port pin connected to corresponding EXTI line.
-  * @retval None
-  */
+ * @brief  EXTI line detection callback.
+ * @param  GPIO_Pin: Specifies the port pin connected to corresponding EXTI line.
+ * @retval None
+ */
 __weak void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   /* Prevent unused argument(s) compilation warning */
@@ -513,20 +513,29 @@ __weak void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 }
 
 /**
-  * @}
-  */
-
+ * @}
+ */
 
 /**
-  * @}
-  */
+ * @}
+ */
 
 #endif /* HAL_GPIO_MODULE_ENABLED */
 /**
-  * @}
-  */
+ * @}
+ */
 
 /**
-  * @}
-  */
+ * @}
+ */
 
+/**
+ * @brief  Convert GPIO_PIN_x define to actual pin number (0-15)
+ * @param  GPIO_Pin: GPIO pin define (GPIO_PIN_0, GPIO_PIN_1, etc.)
+ * @retval Pin number (0-15)
+ */
+uint8_t HAL_GPIO_GetPinNumber(uint16_t GPIO_Pin)
+{
+  /* Count trailing zeros to get pin number */
+  return __builtin_ctz(GPIO_Pin);
+}
