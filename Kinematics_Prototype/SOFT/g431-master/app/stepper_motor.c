@@ -1,577 +1,835 @@
 /**
  *******************************************************************************
  * @file    stepper_motor.c
- * @author  Your Name
- * @date    Current Date
- * @brief   Stepper motor control implementation
- *          Operating at 20kHz PWM frequency for smoother and quieter operation
+ * @author  Ol, naej, Fabs
+ * @date    May 27, 2025
+ * @brief   Stepper motor control with timer interrupts and acceleration profiles
  *******************************************************************************
  */
 
-#include "config.h"
+/* Includes ------------------------------------------------------------------*/
 #include "stepper_motor.h"
-#include "stm32g4_utils.h"
-#include "stm32g4_gpio.h"
-#include "stm32g4_timer.h"
-#include "stm32g4_uart.h"
-/* System includes - correct order is important */
-#include <stdint.h>
-#include <stddef.h>
-#include <string.h>
-#include <stdlib.h>
+#include "stm32g4xx_hal.h" // Fixed: Added missing include for HAL_GetTick()
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 
-/**
- * TB6600 Driver Configuration Notes:
- * ----------------------------------
- * 1. Microstepping Configuration:
- *    - SW1-SW3 pins set microstepping mode
- *    - Common settings:
- *      1/1 step: SW1=OFF, SW2=OFF, SW3=OFF
- *      1/2 step: SW1=ON,  SW2=OFF, SW3=OFF
- *      1/4 step: SW1=OFF, SW2=ON,  SW3=OFF
- *      1/8 step: SW1=ON,  SW2=ON,  SW3=OFF
- *      1/16step: SW1=ON,  SW2=ON,  SW3=ON
- *
- * 2. Current Setting:
- *    - Use potentiometer on TB6600 to set current limit
- *    - Recommended: Set to 70-80% of motor's rated current
- *    - NEMA17: typically 1.5-2A, set TB6600 to ~1.2-1.6A
- *
- * 3. Power Supply:
- *    - TB6600 requires 9-42VDC power supply
- *    - For NEMA17, 24VDC is typically recommended --> we will use 12VDC
- */
+/* Private variables ---------------------------------------------------------*/
+static stepper_motor_t motors[STEPPER_MAX_MOTORS];
+static bool system_initialized = false;
+static uint32_t accel_update_counter = 0;
 
-#define ACCEL_PROFILE_ENTRIES 100 // Number of steps in acceleration profile
+/* Private function declarations ---------------------------------------------*/
+static bool is_motor_id_valid(uint8_t motor_id);
+static void calculate_acceleration_profile(stepper_motor_t *motor, uint32_t steps, uint32_t target_freq);
+static void update_acceleration(stepper_motor_t *motor);
+static void set_motor_frequency(stepper_motor_t *motor, uint32_t frequency);
+static void stop_motor_timer(stepper_motor_t *motor);
+static bool check_limit_switches(stepper_motor_t *motor);
+static bool start_precision_homing_phase2(stepper_motor_t *motor, uint8_t motor_id);
+static bool start_precision_homing_phase3(stepper_motor_t *motor, uint8_t motor_id);
 
-static bool current_direction[STEPPER_COUNT] = {false};
-static void set_direction(stepper_id_t id, bool forward);
-uint32_t BSP_GPIO_get_AF_from_timer(timer_id_t timer_id);
-
-// Track and update frequency only when it changes significantly
-static stepper_motor_t steppers[STEPPER_COUNT];
-static float current_frequencies[STEPPER_COUNT] = {0.0f};
-
-#if ENDSTOP_ENABLED
-// Forward declarations for endstop functions
-static bool check_endstop(stepper_id_t id, endstop_type_t endstop_type);
-#endif
-
-void update_frequency(stepper_id_t id, float new_freq)
-{
-    // Only update if change is more than 1%
-    if (fabsf(current_frequencies[id] - new_freq) > (current_frequencies[id] * 0.01f))
-    {
-        BSP_TIMER_set_frequency_Hz(steppers[id].timer_id, new_freq);
-        current_frequencies[id] = new_freq;
-    }
-}
-
-// Use PROGMEM or const to keep strings in flash instead of RAM
-static const char MSG_MOTOR_INIT[] = "Stepper motor module initialized\n";
+/* Public functions implementations ------------------------------------------*/
 
 /**
- * Validate that a motor ID is valid and the motor is enabled
- * @param id Motor ID to check
- * @return true if valid, false otherwise
+ * @brief Initialize stepper motor system
  */
-static bool is_valid_motor(stepper_id_t id)
+bool stepper_motor_system_init(void)
 {
-    if (id >= STEPPER_COUNT || !steppers[id].enabled)
+    printf("Initializing stepper motor system...\n");
+
+    // Clear all motor configurations
+    memset(motors, 0, sizeof(motors));
+
+    // Initialize all motors as not initialized
+    for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
     {
-        printf("Error: Motor %d not enabled or invalid ID\n", id);
-        return false;
+        motors[i].initialized = false;
+        motors[i].state = MOTOR_STATE_IDLE;
+        motors[i].limit_check_enabled = false;
+
+        // Set default acceleration profile
+        motors[i].accel_profile.start_frequency = STEPPER_MIN_FREQUENCY;
+        motors[i].accel_profile.target_frequency = STEPPER_DEFAULT_FREQUENCY;
+        motors[i].accel_profile.max_frequency = STEPPER_MAX_FREQUENCY;
+        motors[i].accel_profile.acceleration = 5000; // 5000 steps/sec²
+        motors[i].accel_profile.deceleration = 5000; // 5000 steps/sec²
+        motors[i].accel_profile.use_acceleration = true;
     }
+
+    system_initialized = true;
+    printf("Stepper motor system initialized\n");
     return true;
 }
 
-void STEPPER_init(void)
+/**
+ * @brief Initialize a stepper motor
+ */
+bool stepper_motor_init(uint8_t motor_id,
+                        GPIO_TypeDef *pulse_port, uint16_t pulse_pin,
+                        GPIO_TypeDef *dir_port, uint16_t dir_pin,
+                        timer_id_t timer_id, uint16_t timer_channel,
+                        uint16_t microsteps)
 {
-    // Initialize the stepper motor array
-    for (int i = 0; i < STEPPER_COUNT; i++)
+    if (!system_initialized)
     {
-        steppers[i].enabled = false;
+        printf("Error: Stepper motor system not initialized\n");
+        return false;
     }
 
-    printf(MSG_MOTOR_INIT);
-}
-
-stepper_id_t STEPPER_add(GPIO_TypeDef *step_port, uint16_t step_pin,
-                         GPIO_TypeDef *dir_port, uint16_t dir_pin,
-                         timer_id_t timer_id, uint32_t timer_channel,
-                         float steps_per_mm, uint8_t microstepping, float current_limit_a)
-{
-    // Find an available slot
-    for (stepper_id_t id = 0; id < STEPPER_COUNT; id++)
+    if (!is_motor_id_valid(motor_id))
     {
-        if (!steppers[id].enabled)
-        {
-            // Configure step pin as timer output (for PWM)
-            // Use the helper function to get the correct AF for the timer
-            uint32_t timer_af = BSP_GPIO_get_AF_from_timer(timer_id);
-
-            BSP_GPIO_pin_config(step_port, step_pin, GPIO_MODE_AF_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, timer_af);
-
-            // Configure direction pin as output
-            BSP_GPIO_pin_config(dir_port, dir_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL, GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
-
-            // Initialize timer for PWM (changed from 1000Hz to 20kHz)
-            BSP_TIMER_run_us(timer_id, 50, true); // 50us period = 20kHz
-
-            // Store configuration
-            steppers[id].step_port = step_port;
-            steppers[id].step_pin = step_pin;
-            steppers[id].dir_port = dir_port;
-            steppers[id].dir_pin = dir_pin;
-            steppers[id].timer_id = timer_id;
-            steppers[id].timer_channel = timer_channel;
-            steppers[id].steps_per_mm = steps_per_mm;
-            steppers[id].current_position = 0;
-            steppers[id].enabled = true;
-            steppers[id].microstepping = microstepping;     // Store microstepping setting
-            steppers[id].current_limit_a = current_limit_a; // Store current limit
-
-#if ENDSTOP_ENABLED
-            // Initialize endstop settings with defaults
-            steppers[id].min_endstop_port = NULL;
-            steppers[id].min_endstop_pin = 0;
-            steppers[id].max_endstop_port = NULL;
-            steppers[id].max_endstop_pin = 0;
-            steppers[id].endstop_trigger_level = ENDSTOP_TRIGGER_LOW;
-            steppers[id].min_endstop_enabled = false;
-            steppers[id].max_endstop_enabled = false;
-#endif
-
-            printf("Added stepper motor %d\n", id);
-
-            // After setting up the motor configuration
-            printf("Motor ID %d initialized successfully on pins: Step=%d, Dir=%d\n",
-                   id, step_pin, dir_pin);
-            printf("Motor %d config: %d steps/mm, 1/%d microstepping, %.1fA current\n",
-                   id, (int)steps_per_mm, microstepping, current_limit_a);
-
-            // Test the direction pin to make sure GPIO is working
-            HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_SET);
-            HAL_Delay(100);
-            HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_RESET);
-
-            return id;
-        }
+        printf("Error: Invalid motor ID %d\n", motor_id);
+        return false;
     }
 
-    printf("Failed to add stepper motor - no slots available\n");
-    return -1;
-}
+    stepper_motor_t *motor = &motors[motor_id];
 
-static void set_direction(stepper_id_t id, bool forward)
-{
-    if (current_direction[id] != forward)
-    {
-        HAL_GPIO_WritePin(steppers[id].dir_port, steppers[id].dir_pin,
-                          forward ? GPIO_PIN_SET : GPIO_PIN_RESET);
-        current_direction[id] = forward;
+    // Configure direction pin as normal GPIO output
+    BSP_GPIO_pin_config(dir_port, dir_pin, GPIO_MODE_OUTPUT_PP, GPIO_NOPULL,
+                        GPIO_SPEED_FREQ_HIGH, GPIO_NO_AF);
 
-        // Add a small delay after direction changes (TB6600 needs this)
-        HAL_Delay(1);
-    }
-}
+    // Configure pulse pin for timer PWM - use BSP timer PWM setup
+    // The BSP_TIMER_enable_PWM will configure the GPIO automatically
 
-float acceleration_profile(float progress)
-{
-    // Simple S-curve using sine function (0 to 1)
-    return (1.0f - cosf(progress * M_PI)) / 2.0f;
-}
+    // Store configuration
+    motor->pulse_port = pulse_port;
+    motor->pulse_pin = pulse_pin;
+    motor->dir_port = dir_port;
+    motor->dir_pin = dir_pin;
+    motor->timer_id = timer_id;
+    motor->timer_channel = timer_channel;
+    motor->microsteps = microsteps;
+    motor->state = MOTOR_STATE_IDLE;
+    motor->direction = MOTOR_DIR_CLOCKWISE;
+    motor->current_frequency = 0;
+    motor->target_steps = 0;
+    motor->completed_steps = 0;
+    motor->initialized = true;
 
-void STEPPER_move_steps(stepper_id_t id, int32_t steps, float speed)
-{
-    printf("STEPPER_move_steps called for motor %d, steps=%d, speed=%.1f\n", id, steps, speed);
+    // Set direction pin to known state
+    HAL_GPIO_WritePin(dir_port, dir_pin, GPIO_PIN_RESET);
 
-    if (!is_valid_motor(id))
-        return;
+    printf("Motor %d initialized: Timer%d CH%d, microsteps=%d\n",
+           motor_id, timer_id + 1, (timer_channel >> 2) + 1, microsteps);
 
-    bool direction = steps >= 0;
-    steps = abs(steps);
-
-#if ENDSTOP_ENABLED
-    // Check if we're going to hit an endstop
-    // Only check the appropriate endstop based on direction
-    endstop_type_t endstop_to_check = direction ? ENDSTOP_MAX : ENDSTOP_MIN;
-
-    // Only check if the specified endstop is enabled
-    bool endstop_enabled = (endstop_to_check == ENDSTOP_MIN) ? steppers[id].min_endstop_enabled : steppers[id].max_endstop_enabled;
-
-    if (endstop_enabled && check_endstop(id, endstop_to_check))
-    {
-        printf("Warning: Endstop already triggered. Movement prevented in this direction.\n");
-        return;
-    }
-#endif
-
-    // Set appropriate speed limits based on microstepping setting
-    // TB6600 allows higher speeds with higher microstepping
-    float max_speed = 16000.0f * steppers[id].microstepping; // Adjusted for 20kHz base (was 800)
-    float min_speed = 2000.0f;                               // Adjusted for 20kHz base (was 100)
-
-    // With higher microstepping, we can have a proportionally higher max speed
-    printf("Using microstepping 1/%d, max speed adjusted to %.1f Hz\n",
-           steppers[id].microstepping, max_speed);
-
-    if (speed > max_speed)
-    {
-        printf("Speed limited from %.1f to %.1f Hz\n", speed, max_speed);
-        speed = max_speed;
-    }
-
-    if (speed < min_speed)
-    {
-        printf("Speed increased from %.1f to %.1f Hz\n", speed, min_speed);
-        speed = min_speed;
-    }
-
-    // Update position tracking
-    steppers[id].current_position += (direction ? steps : -steps);
-
-    // Set direction pin
-    set_direction(id, direction);
-
-    printf("Moving NEMA 17 stepper %d: %d steps at %.1f Hz\n", id, steps, speed);
-
-    // NEMA 17 motors generally prefer a lower duty cycle for step pulses
-    // 10-20% duty cycle often works better than 50%
-    BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, 20, false, false);
-
-    // Acceleration ramp for NEMA 17 motors
-    // Start at a lower speed and gradually increase to target speed
-    float current_speed = min_speed;
-    update_frequency(id, current_speed);
-
-    // Calculate steps for acceleration and deceleration
-    float total_accel_time_ms = 300.0f; // Keep same accel time
-    float progress;
-    for (int i = 0; i < total_accel_time_ms; i += 10)
-    {
-        HAL_Delay(10);
-        progress = i / total_accel_time_ms;
-        current_speed = min_speed + (speed - min_speed) * acceleration_profile(progress);
-        update_frequency(id, current_speed);
-    }
-
-    // Calculate remaining steps at full speed - adjusted for 20x higher frequency
-    int32_t interval_steps = (int32_t)((current_speed * 0.01f) + 0.5f); // exact steps in 10ms
-    int32_t const_speed_steps = steps - (2 * (int32_t)(total_accel_time_ms * speed / 1000.0f));
-    if (const_speed_steps > 0)
-    {
-        // Run at constant speed
-        uint32_t const_time_ms = (uint32_t)(const_speed_steps * 1000.0f / speed);
-        HAL_Delay(const_time_ms);
-    }
-
-    // Deceleration phase
-    for (int i = total_accel_time_ms; i > 0; i -= 10)
-    {
-        HAL_Delay(10);
-        progress = i / total_accel_time_ms;
-        current_speed = min_speed + (speed - min_speed) * acceleration_profile(progress);
-        update_frequency(id, current_speed);
-    }
-
-    // Run any remaining steps at min_speed
-    int32_t remaining_steps = steps - (int32_t)(total_accel_time_ms * speed / 1000.0f) * 2;
-    if (remaining_steps > 0)
-    {
-        uint32_t remaining_time_ms = (uint32_t)(remaining_steps * 1000.0f / min_speed);
-        HAL_Delay(remaining_time_ms);
-    }
-
-    // Stop PWM
-    STEPPER_stop(id);
-    printf("NEMA 17 movement complete\n");
-}
-
-void STEPPER_move_to_mm(stepper_id_t id, float position_mm, float speed_mm_s)
-{
-    if (!is_valid_motor(id))
-        return;
-
-    // Calculate current position in mm
-    float current_mm = (float)steppers[id].current_position / steppers[id].steps_per_mm;
-
-    // Calculate required movement
-    float move_mm = position_mm - current_mm;
-
-    // Convert to steps and move
-    int32_t steps = (int32_t)(move_mm * steppers[id].steps_per_mm);
-    float step_freq = speed_mm_s * steppers[id].steps_per_mm;
-
-    STEPPER_move_steps(id, steps, step_freq);
-}
-
-void STEPPER_move_mm(stepper_id_t id, float distance_mm, float speed_mm_s)
-{
-    if (!is_valid_motor(id))
-        return;
-
-    // Convert to steps and move
-    int32_t steps = (int32_t)(distance_mm * steppers[id].steps_per_mm);
-    float step_freq = speed_mm_s * steppers[id].steps_per_mm;
-
-    STEPPER_move_steps(id, steps, step_freq);
-}
-
-void STEPPER_stop(stepper_id_t id)
-{
-    if (!is_valid_motor(id))
-        return;
-
-    BSP_TIMER_disable_PWM(steppers[id].timer_id, steppers[id].timer_channel);
+    return true;
 }
 
 /**
- * Get position of stepper motor in millimeters
+ * @brief Set acceleration profile for a motor
  */
-float STEPPER_get_position_mm(stepper_id_t id)
+bool stepper_motor_set_acceleration(uint8_t motor_id, uint32_t acceleration, uint32_t max_frequency)
 {
-    if (!is_valid_motor(id))
-        return 0.0f;
-    return (float)steppers[id].current_position / steppers[id].steps_per_mm;
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    // Clamp values to safe ranges
+    if (max_frequency < STEPPER_MIN_FREQUENCY)
+        max_frequency = STEPPER_MIN_FREQUENCY;
+    if (max_frequency > STEPPER_MAX_FREQUENCY)
+        max_frequency = STEPPER_MAX_FREQUENCY;
+    if (acceleration < 1000)
+        acceleration = 1000; // Minimum 1000 steps/sec²
+    if (acceleration > 50000)
+        acceleration = 50000; // Maximum 50000 steps/sec²
+
+    motor->accel_profile.acceleration = acceleration;
+    motor->accel_profile.deceleration = acceleration; // Same as acceleration
+    motor->accel_profile.max_frequency = max_frequency;
+    motor->accel_profile.use_acceleration = true;
+
+    printf("Motor %d: Acceleration set to %lu steps/sec², max freq %lu Hz\n",
+           motor_id, acceleration, max_frequency);
+
+    return true;
 }
 
 /**
- * Get steps per mm value for a motor
+ * @brief Enable/disable acceleration for a motor
  */
-float STEPPER_get_steps_per_mm(stepper_id_t id)
+bool stepper_motor_enable_acceleration(uint8_t motor_id, bool enable)
 {
-    if (!is_valid_motor(id))
-        return 0.0f;
-    return steppers[id].steps_per_mm;
-}
-
-void STEPPER_home(stepper_id_t id)
-{
-    if (!is_valid_motor(id))
-        return;
-
-#if ENDSTOP_ENABLED
-    if (steppers[id].min_endstop_enabled)
-    {
-        // If endstops are enabled, use them for homing
-        // The max_travel_mm will be passed from the CoreXY module
-        float max_travel_mm = 500.0f;   // Default safety value
-        float homing_speed_mm_s = 5.0f; // Default homing speed
-
-        STEPPER_home_with_endstop(id, homing_speed_mm_s, max_travel_mm);
-    }
-    else
-    {
-        // If no endstop, just reset the position counter
-        steppers[id].current_position = 0;
-        printf("Homing motor %d: no endstop configured, simply resetting position\n", id);
-    }
-#else
-    // If endstops are disabled globally, just reset position
-    steppers[id].current_position = 0;
-#endif
-}
-
-#if ENDSTOP_ENABLED
-// Add the endstop implementation functions
-
-static bool check_endstop(stepper_id_t id, endstop_type_t endstop_type)
-{
-    if (!is_valid_motor(id))
-        return false;
-
-    GPIO_TypeDef *port;
-    uint16_t pin;
-    bool endstop_enabled;
-
-    if (endstop_type == ENDSTOP_MIN)
-    {
-        port = steppers[id].min_endstop_port;
-        pin = steppers[id].min_endstop_pin;
-        endstop_enabled = steppers[id].min_endstop_enabled;
-    }
-    else
-    { // ENDSTOP_MAX
-        port = steppers[id].max_endstop_port;
-        pin = steppers[id].max_endstop_pin;
-        endstop_enabled = steppers[id].max_endstop_enabled;
-    }
-
-    if (!endstop_enabled || port == NULL)
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
     {
         return false;
     }
 
-    // Read the endstop pin
-    GPIO_PinState state = HAL_GPIO_ReadPin(port, pin);
+    motors[motor_id].accel_profile.use_acceleration = enable;
+    printf("Motor %d: Acceleration %s\n", motor_id, enable ? "enabled" : "disabled");
 
-    // Check if triggered according to configured logic level
-    uint8_t trigger_level = steppers[id].endstop_trigger_level;
-    return (state == GPIO_PIN_SET && trigger_level == ENDSTOP_TRIGGER_HIGH) ||
-           (state == GPIO_PIN_RESET && trigger_level == ENDSTOP_TRIGGER_LOW);
+    return true;
 }
 
-HAL_StatusTypeDef STEPPER_config_endstop(stepper_id_t id, endstop_type_t endstop_type,
-                                         GPIO_TypeDef *port, uint16_t pin,
-                                         uint8_t trigger_level)
+/**
+ * @brief Move motor with acceleration profile
+ */
+bool stepper_motor_move_accel(uint8_t motor_id, uint32_t steps, uint32_t target_frequency, stepper_motor_dir_t direction)
 {
-    if (!is_valid_motor(id))
-        return HAL_ERROR;
-
-    // Configure the GPIO pin as input with pull-up
-    BSP_GPIO_pin_config(port, pin, GPIO_MODE_INPUT, GPIO_PULLUP, GPIO_SPEED_FREQ_LOW, GPIO_NO_AF);
-
-    // Update the stepper motor configuration
-    if (endstop_type == ENDSTOP_MIN)
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
     {
-        steppers[id].min_endstop_port = port;
-        steppers[id].min_endstop_pin = pin;
-        steppers[id].min_endstop_enabled = true;
-    }
-    else
-    { // ENDSTOP_MAX
-        steppers[id].max_endstop_port = port;
-        steppers[id].max_endstop_pin = pin;
-        steppers[id].max_endstop_enabled = true;
-    }
-
-    // Set trigger level
-    steppers[id].endstop_trigger_level = trigger_level;
-
-    printf("Configured %s endstop for motor %d on pin %d, trigger level: %s\n",
-           (endstop_type == ENDSTOP_MIN) ? "MIN" : "MAX",
-           id, pin,
-           (trigger_level == ENDSTOP_TRIGGER_HIGH) ? "HIGH" : "LOW");
-
-    return HAL_OK;
-}
-
-bool STEPPER_is_endstop_hit(stepper_id_t id, endstop_type_t endstop_type)
-{
-    return check_endstop(id, endstop_type);
-}
-
-bool STEPPER_home_with_endstop(stepper_id_t id, float homing_speed_mm_s, float max_travel_mm)
-{
-    if (!is_valid_motor(id) || !steppers[id].min_endstop_enabled)
-    {
-        printf("Error: Cannot home motor %d - no MIN endstop configured\n", id);
+        printf("Error: Invalid motor ID or motor not initialized\n");
         return false;
     }
 
-    printf("Homing motor %d (max travel: %.2f mm)...\n", id, max_travel_mm);
+    stepper_motor_t *motor = &motors[motor_id];
 
-    // First, check if already at home position
-    if (check_endstop(id, ENDSTOP_MIN))
+    if (motor->state != MOTOR_STATE_IDLE)
     {
-        printf("Already at home position\n");
-        steppers[id].current_position = 0;
+        printf("Error: Motor %d is busy (state: %d)\n", motor_id, motor->state);
+        return false;
+    }
+
+    if (steps == 0)
+    {
+        printf("Warning: Zero steps requested for motor %d\n", motor_id);
         return true;
     }
 
-    // Calculate maximum steps based on max travel distance
-    int32_t max_steps = (int32_t)(max_travel_mm * steppers[id].steps_per_mm);
-
-    // Convert speed to steps per second
-    float homing_speed_steps = homing_speed_mm_s * steppers[id].steps_per_mm;
-
-    // Set direction towards home (negative)
-    set_direction(id, false);
-
-    // Enable stepping
-    BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, 20, false, false);
-
-    // Set initial speed (slower for homing)
-    float slow_homing_speed = homing_speed_steps * 0.5f;
-    if (slow_homing_speed < 2000.0f) // Changed from 100.0f to 2000.0f for 20kHz
-        slow_homing_speed = 2000.0f;
-    update_frequency(id, slow_homing_speed);
-
-    // Move until endstop is hit or max travel reached
-    int32_t steps_moved = 0;
-    bool endstop_hit = false;
-
-    while (steps_moved < max_steps)
+    // Check limit switches before starting movement
+    if (motor->limit_check_enabled && check_limit_switches(motor))
     {
-        HAL_Delay(10);                                       // Check every 10ms
-        steps_moved += (int32_t)(slow_homing_speed * 0.01f); // Approx steps in 10ms
-
-        // Check if endstop is hit
-        if (check_endstop(id, ENDSTOP_MIN))
-        {
-            endstop_hit = true;
-            break;
-        }
+        printf("Error: Limit switch triggered, cannot start movement\n");
+        return false;
     }
 
-    // Stop PWM
-    STEPPER_stop(id);
+    // Clamp target frequency to valid range
+    if (target_frequency < STEPPER_MIN_FREQUENCY)
+        target_frequency = STEPPER_MIN_FREQUENCY;
+    if (target_frequency > motor->accel_profile.max_frequency)
+        target_frequency = motor->accel_profile.max_frequency;
 
-    if (endstop_hit)
+    // Set direction
+    motor->direction = direction;
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin,
+                      (direction == MOTOR_DIR_CLOCKWISE) ? GPIO_PIN_RESET : GPIO_PIN_SET);
+
+    // Setup movement parameters
+    motor->target_steps = steps;
+    motor->completed_steps = 0;
+    motor->accel_profile.target_frequency = target_frequency;
+
+    // Calculate acceleration profile
+    if (motor->accel_profile.use_acceleration)
     {
-        printf("Home position found for motor %d\n", id);
+        calculate_acceleration_profile(motor, steps, target_frequency);
+        motor->current_frequency = motor->accel_profile.start_frequency;
+        motor->state = MOTOR_STATE_ACCELERATING;
+    }
+    else
+    {
+        motor->current_frequency = target_frequency;
+        motor->accel_steps = 0;
+        motor->decel_steps = 0;
+        motor->const_steps = steps;
+        motor->state = MOTOR_STATE_MOVING;
+    }
 
-        // Set the current position to zero
-        steppers[id].current_position = 0;
+    // Start timer with PWM - calculate period for frequency
+    uint32_t period_us = 1000000 / motor->current_frequency; // Period in microseconds
 
-        // Move a small distance away from the endstop
-        STEPPER_move_mm(id, 1.0f, homing_speed_mm_s);
+    // Initialize timer with calculated period and enable interrupts
+    BSP_TIMER_run_us(motor->timer_id, period_us, true);
 
-        // Then slowly move back to the endstop for precision
-        set_direction(id, false);
-        BSP_TIMER_enable_PWM(steppers[id].timer_id, steppers[id].timer_channel, 20, false, false);
-        update_frequency(id, slow_homing_speed * 0.5f);
+    // Enable PWM on the motor's channel with 50% duty cycle
+    BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, 500, false, false);
 
-        steps_moved = 0;
-        int32_t back_off_steps = (int32_t)(2.0f * steppers[id].steps_per_mm);
+    printf("Motor %d: Started %lu steps at %lu Hz (%lu us period), direction %d, state %d\n",
+           motor_id, steps, motor->current_frequency, period_us, direction, motor->state);
 
-        while (steps_moved < back_off_steps)
+    return true;
+}
+
+/**
+ * @brief Move motor at constant speed (legacy compatibility)
+ */
+bool stepper_motor_move(uint8_t motor_id, uint32_t steps, uint32_t frequency, stepper_motor_dir_t direction)
+{
+    // Temporarily disable acceleration for constant speed move
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    bool old_accel_setting = motors[motor_id].accel_profile.use_acceleration;
+    motors[motor_id].accel_profile.use_acceleration = false;
+
+    bool result = stepper_motor_move_accel(motor_id, steps, frequency, direction);
+
+    motors[motor_id].accel_profile.use_acceleration = old_accel_setting;
+
+    return result;
+}
+
+/**
+ * @brief Stop motor immediately
+ */
+bool stepper_motor_stop(uint8_t motor_id)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    // Stop timer
+    stop_motor_timer(motor);
+
+    // Reset state
+    motor->state = MOTOR_STATE_IDLE;
+    motor->current_frequency = 0;
+    motor->target_steps = 0;
+    motor->completed_steps = 0;
+
+    printf("Motor %d stopped\n", motor_id);
+
+    return true;
+}
+
+/**
+ * @brief Emergency stop all motors
+ */
+void stepper_motor_emergency_stop_all(void)
+{
+    printf("EMERGENCY STOP: Stopping all motors\n");
+
+    for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
+    {
+        if (motors[i].initialized && motors[i].state != MOTOR_STATE_IDLE)
         {
-            HAL_Delay(10);
-            steps_moved += (int32_t)(slow_homing_speed * 0.01f * 0.5f);
+            stepper_motor_stop(i);
+        }
+    }
+}
 
-            if (check_endstop(id, ENDSTOP_MIN))
+/**
+ * @brief Get motor state
+ */
+stepper_motor_state_t stepper_motor_get_state(uint8_t motor_id)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return MOTOR_STATE_ERROR;
+    }
+
+    return motors[motor_id].state;
+}
+
+/**
+ * @brief Get completed steps
+ */
+uint32_t stepper_motor_get_completed_steps(uint8_t motor_id)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return 0;
+    }
+
+    return motors[motor_id].completed_steps;
+}
+
+/**
+ * @brief Get current frequency
+ */
+uint32_t stepper_motor_get_current_frequency(uint8_t motor_id)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return 0;
+    }
+
+    return motors[motor_id].current_frequency;
+}
+
+/**
+ * @brief Update stepper motor system - call in main loop
+ */
+void stepper_motor_update(void)
+{
+    if (!system_initialized)
+    {
+        return;
+    }
+
+    // Check each motor for completion and state updates
+    for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
+    {
+        stepper_motor_t *motor = &motors[i];
+
+        if (motor->initialized && motor->state != MOTOR_STATE_IDLE)
+        {
+            // Check if movement is complete
+            if (motor->completed_steps >= motor->target_steps && motor->state != MOTOR_STATE_HOMING)
             {
-                break;
+                printf("Motor %d movement complete: %lu/%lu steps - STOPPING\n",
+                       i, motor->completed_steps, motor->target_steps);
+
+                // Stop the timer and reset state
+                stop_motor_timer(motor);
+                motor->state = MOTOR_STATE_IDLE;
+                motor->current_frequency = 0;
+
+                continue;
             }
+
+            if (motor->state == MOTOR_STATE_HOMING)
+            {
+                // Check limit switches during homing
+                if (motor->limit_check_enabled && check_limit_switches(motor))
+                {
+                    if (motor->homing_phase == 1)
+                    {
+                        // Fast phase hit limit - start phase 2 (back off)
+                        printf("Motor %d: Fast homing complete, starting precision phase\n", i);
+                        start_precision_homing_phase2(motor, i);
+                        continue;
+                    }
+                    else if (motor->homing_phase == 3)
+                    {
+                        // Slow precision phase hit limit - homing complete
+                        printf("Motor %d: Precision homing complete\n", i);
+                        stop_motor_timer(motor);
+                        motor->state = MOTOR_STATE_IDLE;
+                        motor->current_frequency = 0;
+                        motor->homing_phase = 0;
+                        continue;
+                    }
+                }
+
+                // Handle phase 2 completion (backing off)
+                if (motor->homing_phase == 2 && motor->completed_steps >= motor->target_steps)
+                {
+                    printf("Motor %d: Back-off complete, starting slow approach\n", i);
+                    start_precision_homing_phase3(motor, i);
+                    continue;
+                }
+            }
+
+            // Check limit switches during movement
+            if (motor->limit_check_enabled && check_limit_switches(motor))
+            {
+                printf("Motor %d stopped by limit switch\n", i);
+                stop_motor_timer(motor);
+                motor->state = MOTOR_STATE_IDLE;
+                motor->current_frequency = 0;
+                continue;
+            }
+
+            // Update acceleration profile
+            update_acceleration(motor);
         }
+    }
+}
 
-        STEPPER_stop(id);
+/**
+ * @brief Associate motor with axis for limit switch checking
+ */
+void stepper_motor_set_axis(uint8_t motor_id, axis_t axis)
+{
+    if (is_motor_id_valid(motor_id) && motors[motor_id].initialized)
+    {
+        motors[motor_id].axis = axis;
+        printf("Motor %d associated with %s axis\n", motor_id, limit_switch_axis_to_string(axis));
+    }
+}
 
-        // Set position to zero again
-        steppers[id].current_position = 0;
-        printf("Precise homing complete\n");
+/**
+ * @brief Enable/disable limit switch checking for motor
+ */
+void stepper_motor_enable_limit_check(uint8_t motor_id, bool enable)
+{
+    if (is_motor_id_valid(motor_id) && motors[motor_id].initialized)
+    {
+        motors[motor_id].limit_check_enabled = enable;
+        printf("Motor %d: Limit checking %s\n", motor_id, enable ? "enabled" : "disabled");
+    }
+}
 
-        return true;
+/**
+ * @brief Home motor with two-speed precision homing
+ * @param motor_id Motor ID
+ * @param fast_frequency Fast homing frequency in Hz (e.g., 2000)
+ * @param slow_frequency Slow precision frequency in Hz (e.g., 500)
+ * @return true if homing started successfully
+ */
+bool stepper_motor_home_precision(uint8_t motor_id, uint32_t fast_frequency, uint32_t slow_frequency)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    if (motor->state != MOTOR_STATE_IDLE)
+    {
+        printf("Error: Motor %d is busy, cannot home\n", motor_id);
+        return false;
+    }
+
+    // Store homing parameters for the two-phase process
+    motor->homing_fast_freq = fast_frequency;
+    motor->homing_slow_freq = slow_frequency;
+    motor->homing_phase = 1; // Start with phase 1 (fast)
+
+    // Enable limit checking for homing
+    bool old_limit_setting = motor->limit_check_enabled;
+    motor->limit_check_enabled = true;
+
+    // Set homing state and direction (assume homing moves toward MIN limit)
+    motor->state = MOTOR_STATE_HOMING;
+    motor->direction = MOTOR_DIR_COUNTERCLOCKWISE; // Toward home/MIN
+
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_SET); // CCW
+
+    // Start fast homing phase
+    motor->target_steps = 0xFFFFFFFF; // Large number for continuous movement
+    motor->completed_steps = 0;
+    motor->current_frequency = fast_frequency;
+
+    set_motor_frequency(motor, fast_frequency);
+
+    printf("Motor %d: Precision homing started - Phase 1 (fast) at %lu Hz\n", motor_id, fast_frequency);
+
+    return true;
+}
+
+/**
+ * @brief Continue with slow precision homing phase
+ */
+static bool start_precision_homing_phase2(stepper_motor_t *motor, uint8_t motor_id)
+{
+    printf("Motor %d: Starting precision homing Phase 2 (slow)\n", motor_id);
+
+    // Stop current movement
+    stop_motor_timer(motor);
+    HAL_Delay(100); // Brief pause between phases
+
+    // Back off from limit switch (move away a small distance)
+    motor->direction = MOTOR_DIR_CLOCKWISE;                             // Away from limit
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_RESET); // CW
+
+    // Move away from limit switch slowly
+    motor->target_steps = 200; // Back off ~2.5mm at 80 steps/mm
+    motor->completed_steps = 0;
+    motor->current_frequency = motor->homing_slow_freq;
+    motor->homing_phase = 2; // Phase 2: backing off
+
+    set_motor_frequency(motor, motor->homing_slow_freq);
+
+    printf("Motor %d: Backing off from limit switch\n", motor_id);
+
+    return true;
+}
+
+/**
+ * @brief Start final slow approach to limit switch
+ */
+static bool start_precision_homing_phase3(stepper_motor_t *motor, uint8_t motor_id)
+{
+    printf("Motor %d: Starting precision homing Phase 3 (slow approach)\n", motor_id);
+
+    // Brief pause
+    HAL_Delay(100);
+
+    // Now approach limit switch slowly for precision
+    motor->direction = MOTOR_DIR_COUNTERCLOCKWISE;                    // Back toward limit
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_SET); // CCW
+
+    motor->target_steps = 0xFFFFFFFF; // Continuous until limit hit
+    motor->completed_steps = 0;
+    motor->current_frequency = motor->homing_slow_freq;
+    motor->homing_phase = 3; // Phase 3: slow precision approach
+
+    set_motor_frequency(motor, motor->homing_slow_freq);
+
+    printf("Motor %d: Slow precision approach at %lu Hz\n", motor_id, motor->homing_slow_freq);
+
+    return true;
+}
+
+/**
+ * @brief Move motor with limit checking
+ */
+bool stepper_motor_move_with_limits(uint8_t motor_id, uint32_t steps, uint32_t frequency, stepper_motor_dir_t direction)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return false;
+    }
+
+    // Temporarily enable limit checking
+    bool old_limit_setting = motors[motor_id].limit_check_enabled;
+    motors[motor_id].limit_check_enabled = true;
+
+    bool result = stepper_motor_move(motor_id, steps, frequency, direction);
+
+    // Note: Don't restore old setting immediately, let the movement complete with limits enabled
+
+    return result;
+}
+
+/**
+ * @brief Manual step for testing
+ */
+void stepper_motor_manual_step(uint8_t motor_id, uint32_t steps, uint32_t delay_ms)
+{
+    if (!is_motor_id_valid(motor_id) || !motors[motor_id].initialized)
+    {
+        return;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    printf("Manual stepping motor %d: %lu steps with %lu ms delay\n", motor_id, steps, delay_ms);
+
+    // Set direction
+    HAL_GPIO_WritePin(motor->dir_port, motor->dir_pin, GPIO_PIN_RESET);
+    HAL_Delay(1);
+
+    // Generate steps manually
+    for (uint32_t i = 0; i < steps; i++)
+    {
+        HAL_GPIO_WritePin(motor->pulse_port, motor->pulse_pin, GPIO_PIN_SET);
+        HAL_Delay(1);
+        HAL_GPIO_WritePin(motor->pulse_port, motor->pulse_pin, GPIO_PIN_RESET);
+        HAL_Delay(delay_ms);
+
+        printf("Step %lu/%lu\n", i + 1, steps);
+    }
+
+    printf("Manual stepping complete\n");
+}
+
+/**
+ * @brief Debug motor configuration
+ */
+void stepper_motor_debug_config(uint8_t motor_id)
+{
+    if (!is_motor_id_valid(motor_id))
+    {
+        printf("Invalid motor ID: %d\n", motor_id);
+        return;
+    }
+
+    stepper_motor_t *motor = &motors[motor_id];
+
+    printf("=== Motor %d Configuration ===\n", motor_id);
+    printf("Initialized: %s\n", motor->initialized ? "Yes" : "No");
+
+    if (motor->initialized)
+    {
+        printf("Timer: %d, Channel: 0x%04X\n", motor->timer_id, motor->timer_channel);
+        printf("Microsteps: %d\n", motor->microsteps);
+        printf("State: %d\n", motor->state);
+        printf("Current Freq: %lu Hz\n", motor->current_frequency);
+        printf("Completed Steps: %lu/%lu\n", motor->completed_steps, motor->target_steps);
+        printf("Acceleration: %s\n", motor->accel_profile.use_acceleration ? "Enabled" : "Disabled");
+        printf("Limit Check: %s\n", motor->limit_check_enabled ? "Enabled" : "Disabled");
+    }
+    printf("===============================\n");
+}
+
+/**
+ * @brief Timer interrupt handler for motor pulse generation
+ */
+void stepper_motor_timer_interrupt(timer_id_t timer_id)
+{
+    // Find motor using this timer
+    for (uint8_t i = 0; i < STEPPER_MAX_MOTORS; i++)
+    {
+        stepper_motor_t *motor = &motors[i];
+
+        if (motor->initialized && motor->timer_id == timer_id && motor->state != MOTOR_STATE_IDLE)
+        {
+            // Increment step counter
+            motor->completed_steps++;
+
+            // Debug every 500 steps to reduce output
+            if (motor->completed_steps % 500 == 0)
+            {
+                printf("Motor %d: Step %lu/%lu (%.1f%%) at %lu Hz\n",
+                       i, motor->completed_steps, motor->target_steps,
+                       (float)motor->completed_steps * 100.0f / (float)motor->target_steps,
+                       motor->current_frequency);
+            }
+
+            // Check for completion directly in interrupt
+            if (motor->completed_steps >= motor->target_steps && motor->state != MOTOR_STATE_HOMING)
+            {
+                // Stop immediately
+                stop_motor_timer(motor);
+                motor->state = MOTOR_STATE_IDLE;
+                motor->current_frequency = 0;
+
+                printf("Motor %d COMPLETED: %lu steps\n", i, motor->completed_steps);
+                return;
+            }
+
+            return; // Only handle one motor per interrupt
+        }
+    }
+}
+
+/* Private functions implementations ------------------------------------------*/
+
+/**
+ * @brief Check if motor ID is valid
+ */
+static bool is_motor_id_valid(uint8_t motor_id)
+{
+    return motor_id < STEPPER_MAX_MOTORS;
+}
+
+/**
+ * @brief Calculate acceleration profile for a move
+ */
+static void calculate_acceleration_profile(stepper_motor_t *motor, uint32_t steps, uint32_t target_freq)
+{
+    uint32_t start_freq = motor->accel_profile.start_frequency;
+    uint32_t accel = motor->accel_profile.acceleration;
+
+    // Calculate steps needed for acceleration and deceleration
+    uint32_t accel_steps = ((target_freq * target_freq) - (start_freq * start_freq)) / (2 * accel);
+    uint32_t decel_steps = accel_steps; // Symmetric profile
+
+    // Ensure we don't exceed total steps
+    if ((accel_steps + decel_steps) > steps)
+    {
+        // Triangular profile - no constant speed phase
+        accel_steps = steps / 2;
+        decel_steps = steps - accel_steps;
+        motor->const_steps = 0;
     }
     else
     {
-        printf("WARNING: Failed to find home position for motor %d\n", id);
-        return false;
+        // Trapezoidal profile
+        motor->const_steps = steps - accel_steps - decel_steps;
+    }
+
+    motor->accel_steps = accel_steps;
+    motor->decel_steps = decel_steps;
+
+    printf("Acceleration profile: accel=%lu, const=%lu, decel=%lu steps\n",
+           accel_steps, motor->const_steps, decel_steps);
+}
+
+/**
+ * @brief Update acceleration during movement
+ */
+static void update_acceleration(stepper_motor_t *motor)
+{
+    if (!motor->accel_profile.use_acceleration)
+    {
+        return;
+    }
+
+    uint32_t new_frequency = motor->current_frequency;
+
+    if (motor->state == MOTOR_STATE_ACCELERATING)
+    {
+        if (motor->completed_steps >= motor->accel_steps)
+        {
+            // Transition to constant speed or deceleration
+            motor->state = (motor->const_steps > 0) ? MOTOR_STATE_MOVING : MOTOR_STATE_DECELERATING;
+            new_frequency = motor->accel_profile.target_frequency;
+        }
+        else
+        {
+            // Continue accelerating
+            float progress = (float)motor->completed_steps / motor->accel_steps;
+            new_frequency = motor->accel_profile.start_frequency +
+                            (uint32_t)(progress * (motor->accel_profile.target_frequency - motor->accel_profile.start_frequency));
+        }
+    }
+    else if (motor->state == MOTOR_STATE_MOVING)
+    {
+        if (motor->completed_steps >= (motor->accel_steps + motor->const_steps))
+        {
+            // Transition to deceleration
+            motor->state = MOTOR_STATE_DECELERATING;
+            new_frequency = motor->accel_profile.target_frequency;
+        }
+    }
+    else if (motor->state == MOTOR_STATE_DECELERATING)
+    {
+        uint32_t decel_start = motor->accel_steps + motor->const_steps;
+        uint32_t decel_progress = motor->completed_steps - decel_start;
+
+        if (decel_progress < motor->decel_steps)
+        {
+            float progress = (float)decel_progress / motor->decel_steps;
+            new_frequency = motor->accel_profile.target_frequency -
+                            (uint32_t)(progress * (motor->accel_profile.target_frequency - motor->accel_profile.start_frequency));
+        }
+    }
+
+    // Update frequency if changed
+    if (new_frequency != motor->current_frequency)
+    {
+        motor->current_frequency = new_frequency;
+        set_motor_frequency(motor, new_frequency);
     }
 }
-#endif
 
-uint32_t BSP_GPIO_get_AF_from_timer(timer_id_t timer_id)
+/**
+ * @brief Set motor frequency by updating timer period
+ */
+static void set_motor_frequency(stepper_motor_t *motor, uint32_t frequency)
 {
-    // STM32G4 alternate function mapping for timers
-    switch (timer_id)
+    if (frequency == 0)
     {
-    case TIMER1_ID:
-        return GPIO_AF4_TIM1; // TIM1 on AF4
-    case TIMER2_ID:
-        return GPIO_AF1_TIM2; // TIM2 on AF1
-    case TIMER3_ID:
-        return GPIO_AF2_TIM3; // TIM3 on AF2
-    case TIMER4_ID:
-        return GPIO_AF2_TIM4; // TIM4 on AF2
-    case TIMER6_ID:
-        return GPIO_AF2_TIM15; // TIM15 on AF2
-    // Add other timers as needed
-    default:
-        return GPIO_AF2_TIM3; // Default to TIM3
+        stop_motor_timer(motor);
+        return;
     }
+
+    // Clamp frequency to safe range
+    if (frequency < STEPPER_MIN_FREQUENCY)
+        frequency = STEPPER_MIN_FREQUENCY;
+    if (frequency > STEPPER_MAX_FREQUENCY)
+        frequency = STEPPER_MAX_FREQUENCY;
+
+    // Calculate new period in microseconds
+    uint32_t period_us = 1000000 / frequency;
+
+    // Restart with new period
+    BSP_TIMER_run_us(motor->timer_id, period_us, true);
+    BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, 500, false, false);
+
+    motor->current_frequency = frequency;
+}
+
+/**
+ * @brief Stop motor timer
+ */
+static void stop_motor_timer(stepper_motor_t *motor)
+{
+    if (motor->current_frequency > 0)
+    {
+        BSP_TIMER_enable_PWM(motor->timer_id, motor->timer_channel, 0, false, false);
+
+        motor->current_frequency = 0;
+        printf("Timer %d stopped for motor\n", motor->timer_id + 1);
+    }
+}
+
+/**
+ * @brief Check limit switches for motor
+ */
+static bool check_limit_switches(stepper_motor_t *motor)
+{
+    if (!motor->limit_check_enabled)
+    {
+        return false;
+    }
+
+    // Check appropriate limit switch based on direction
+    limit_position_t limit_to_check = (motor->direction == MOTOR_DIR_CLOCKWISE) ? LIMIT_MAX : LIMIT_MIN;
+
+    return (limit_switch_read(motor->axis, limit_to_check) == LIMIT_TRIGGERED);
 }
