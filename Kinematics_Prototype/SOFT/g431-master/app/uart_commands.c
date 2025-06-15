@@ -10,11 +10,14 @@
 /* Includes ------------------------------------------------------------------*/
 #include "uart_commands.h"
 #include "command_buffer.h" // Add this include
+#include "command_buffer.h" // Add this include
 #include "parser.h"
 #include "kinematics.h"
 #include "stepper_motor.h"
 #include "limit_switches.h"
 #include "stm32g4_uart.h"
+#include "sd_gcode_reader.h"
+#include "gcode_move_buffer.h"
 #include "sd_gcode_reader.h"
 #include "gcode_move_buffer.h"
 #include <stdio.h>
@@ -68,10 +71,34 @@ bool uart_commands_init(uart_id_t uart_id_param)
         return false;
     }
 
+    // Initialize command buffer
+    if (!command_buffer_init())
+    {
+        printf("- ERROR: Failed to initialize command buffer\n");
+        return false;
+    }
+
     // Initialize G-code parser
     if (!parser_init())
     {
         printf("- ERROR: Failed to initialize G-code parser\n");
+        return false;
+    }
+
+    // Initialize SD card G-code reader
+    if (sd_gcode_reader_init())
+    {
+        printf("- SD card G-code reader initialized\n");
+    }
+    else
+    {
+        printf("- WARNING: SD card G-code reader initialization failed\n");
+    }
+
+    // Initialize G-code move buffer
+    if (!gcode_move_buffer_init())
+    {
+        printf("- ERROR: Failed to initialize G-code move buffer\n");
         return false;
     }
 
@@ -228,8 +255,10 @@ void uart_commands_update(void)
         printf("- Processing command: '%s' (len=%d)\n", line_buffer, strlen(line_buffer));
 
         // Emergency stop handling - bypass buffer
+        // Emergency stop handling - bypass buffer
         if (strncmp(line_buffer, "M112", 4) == 0 || strncmp(line_buffer, "stop", 4) == 0)
         {
+            command_buffer_add_emergency(line_buffer);
             command_buffer_add_emergency(line_buffer);
             reset_line_buffer();
             current_state = UART_CMD_STATE_IDLE;
@@ -263,9 +292,43 @@ void uart_commands_update(void)
                     send_ok_response(); // Acknowledge command was buffered
                 }
             }
+            // Some special commands should be executed immediately
+            if (strncmp(line_buffer, "help", 4) == 0 ||
+                strncmp(line_buffer, "status", 6) == 0 ||
+                strncmp(line_buffer, "pos", 3) == 0 ||
+                strncmp(line_buffer, "stats", 5) == 0 ||
+                strncmp(line_buffer, "motors", 6) == 0 ||
+                strncmp(line_buffer, "limits", 6) == 0)
+            {
+                // Execute immediately for informational commands
+                process_special_command(line_buffer);
+            }
+            else
+            {
+                // Buffer other special commands
+                if (!command_buffer_add(line_buffer, false, false))
+                {
+                    send_error_response("Failed to add command to buffer");
+                    stats.errors_count++;
+                }
+                else
+                {
+                    send_ok_response(); // Acknowledge command was buffered
+                }
+            }
         }
         else
         {
+            // Buffer G-code commands
+            if (!command_buffer_add(line_buffer, true, false))
+            {
+                send_error_response("Failed to add G-code to buffer");
+                stats.errors_count++;
+            }
+            else
+            {
+                send_ok_response(); // Acknowledge command was buffered
+            }
             // Buffer G-code commands
             if (!command_buffer_add(line_buffer, true, false))
             {
@@ -548,8 +611,15 @@ static void process_special_command(const char *line)
         uart_commands_send_response("|  pause - Pause command execution   |");
         uart_commands_send_response("|  resume - Resume command execution |");
         uart_commands_send_response("|  clear - Clear command buffer      |");
+        uart_commands_send_response("|  buffer - Show buffer status       |");
+        uart_commands_send_response("|  pause - Pause command execution   |");
+        uart_commands_send_response("|  resume - Resume command execution |");
+        uart_commands_send_response("|  clear - Clear command buffer      |");
         uart_commands_send_response("|  motors - Show motor status        |");
         uart_commands_send_response("|  limits - Show limit switch status |");
+        uart_commands_send_response("|  sdlist - List G-code files on SD  |");
+        uart_commands_send_response("|  sdprint <file> - Print from SD    |");
+        uart_commands_send_response("|  sdstatus - Show SD card status    |");
         uart_commands_send_response("|  sdlist - List G-code files on SD  |");
         uart_commands_send_response("|  sdprint <file> - Print from SD    |");
         uart_commands_send_response("|  sdstatus - Show SD card status    |");
@@ -614,6 +684,7 @@ static void process_special_command(const char *line)
     }
     else if (strncmp(line, "stats", 5) == 0)
     {
+        cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
         cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
         uart_commands_send_response_printf("| Lines: %lu |", stats.lines_processed);
         uart_commands_send_response_printf("| Commands: %lu |", stats.commands_executed);
@@ -773,6 +844,7 @@ static void process_special_command(const char *line)
 
 /**
  * @brief Process G-code commands (now just adds to buffer)
+ * @brief Process G-code commands (now just adds to buffer)
  */
 static void process_gcode_command(const char *line)
 {
@@ -781,9 +853,15 @@ static void process_gcode_command(const char *line)
     if (!command_buffer_add(line, true, false))
     {
         send_error_response("Failed to add G-code to buffer");
+    // This function is no longer used since G-code is buffered
+    // Keep for backward compatibility but just buffer the command
+    if (!command_buffer_add(line, true, false))
+    {
+        send_error_response("Failed to add G-code to buffer");
     }
     else
     {
+        send_ok_response();
         send_ok_response();
     }
 }
@@ -803,6 +881,7 @@ static void send_error_response(const char *error)
 {
     uart_commands_send_response_printf("|------------------------------------|");
     uart_commands_send_response_printf("| Error: %s |", error);
+    uart_commands_send_response_printf("|------------------------------------|");
     uart_commands_send_response_printf("|------------------------------------|");
 }
 
