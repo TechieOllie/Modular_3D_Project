@@ -685,7 +685,6 @@ static void process_special_command(const char *line)
     else if (strncmp(line, "stats", 5) == 0)
     {
         cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
-        cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
         uart_commands_send_response_printf("| Lines: %lu |", stats.lines_processed);
         uart_commands_send_response_printf("| Commands: %lu |", stats.commands_executed);
         uart_commands_send_response_printf("| Errors: %lu |", stats.errors_count);
@@ -844,7 +843,6 @@ static void process_special_command(const char *line)
 
 /**
  * @brief Process G-code commands (now just adds to buffer)
- * @brief Process G-code commands (now just adds to buffer)
  */
 static void process_gcode_command(const char *line)
 {
@@ -853,15 +851,9 @@ static void process_gcode_command(const char *line)
     if (!command_buffer_add(line, true, false))
     {
         send_error_response("Failed to add G-code to buffer");
-    // This function is no longer used since G-code is buffered
-    // Keep for backward compatibility but just buffer the command
-    if (!command_buffer_add(line, true, false))
-    {
-        send_error_response("Failed to add G-code to buffer");
     }
     else
     {
-        send_ok_response();
         send_ok_response();
     }
 }
@@ -881,7 +873,6 @@ static void send_error_response(const char *error)
 {
     uart_commands_send_response_printf("|------------------------------------|");
     uart_commands_send_response_printf("| Error: %s |", error);
-    uart_commands_send_response_printf("|------------------------------------|");
     uart_commands_send_response_printf("|------------------------------------|");
 }
 
