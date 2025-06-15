@@ -133,8 +133,8 @@ void stepper_motor_with_limits_demo(void)
     printf("Homing X-axis...\n");
     stepper_motor_home_precision(0, 2000, 400); // Motor 0, 1000 steps/sec
 
-        // Wait for homing to complete
-        while (stepper_motor_get_state(0) != MOTOR_STATE_IDLE)
+    // Wait for homing to complete
+    while (stepper_motor_get_state(0) != MOTOR_STATE_IDLE)
     {
         stepper_motor_update();
         HAL_Delay(10);
@@ -145,9 +145,9 @@ void stepper_motor_with_limits_demo(void)
 
     // Home Y-axis
     printf("Homing Y-axis...\n");
-    ststepper_motor_home_precision(1, 2000, 400); // Motor 1, 1000 steps/sec
+    stepper_motor_home_precision(1, 2000, 400); // Motor 1, 1000 steps/sec
 
-        while (stepper_motor_get_state(1) != MOTOR_STATE_IDLE)
+    while (stepper_motor_get_state(1) != MOTOR_STATE_IDLE)
     {
         stepper_motor_update();
         HAL_Delay(10);

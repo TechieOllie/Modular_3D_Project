@@ -77,11 +77,14 @@ target_link_options(
 
 target_sources(
     ${TARGET_NAME} PRIVATE
+    "app\\command_buffer.c"
+    "app\\gcode_move_buffer.c"
     "app\\kinematics.c"
     "app\\limit_switches_demo.c"
     "app\\limit_switches.c"
     "app\\main.c"
     "app\\parser.c"
+    "app\\sd_gcode_reader.c"
     "app\\stepper_motor.c"
     "app\\uart_commands.c"
     "core\\Src\\stm32g4xx_it.c"

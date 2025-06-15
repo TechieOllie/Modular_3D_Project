@@ -68,7 +68,7 @@
 /*------------------Expanders------------------*/
 #define USE_MCP23017 0 // GPIO expander
 #define USE_MCP23S17 0 // GPIO expander
-#define USE_SD_CARD 0  // Carte SD
+#define USE_SD_CARD 1  // Carte SD - Enable for G-code file reading
 
 /*------------------Actionneurs------------------*/
 #define USE_MOTOR_DC 0

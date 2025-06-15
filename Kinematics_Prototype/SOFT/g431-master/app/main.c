@@ -23,6 +23,8 @@
 #include "kinematics.h"
 #include "limit_switches.h"
 #include "uart_commands.h"
+#include "sd_gcode_reader.h"
+#include "gcode_move_buffer.h"
 
 #define BLINK_DELAY 100 // ms
 #define MAX_CMD_LENGTH 128
@@ -313,6 +315,24 @@ int main(void)
     // Setup kinematics system
     setup_kinematics();
 
+    // Initialize SD card G-code systems
+    printf("Initializing SD card G-code systems...\n");
+    if (sd_gcode_reader_init())
+    {
+        printf("SD card G-code reader ready\n");
+    }
+    else
+    {
+        printf("WARNING: SD card not available\n");
+    }
+
+    if (!gcode_move_buffer_init())
+    {
+        printf("ERROR: Failed to initialize G-code move buffer!\n");
+        while (1)
+            ; // Stop here if move buffer fails
+    }
+
     // Initialize UART command system
     if (!uart_commands_init(UART2_ID))
     {
@@ -350,6 +370,7 @@ int main(void)
         uart_commands_update(); // Process incoming commands
         kinematics_update();
         stepper_motor_update();
+        gcode_move_buffer_update(); // Process G-code moves
 
         // Update parser position periodically
         if (HAL_GetTick() - last_pos_update > 100) // Every 100ms

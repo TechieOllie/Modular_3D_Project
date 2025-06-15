@@ -9,11 +9,14 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "uart_commands.h"
+#include "command_buffer.h" // Add this include
 #include "parser.h"
 #include "kinematics.h"
 #include "stepper_motor.h"
 #include "limit_switches.h"
 #include "stm32g4_uart.h"
+#include "sd_gcode_reader.h"
+#include "gcode_move_buffer.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
@@ -27,6 +30,10 @@ static char line_buffer[UART_CMD_MAX_LINE_LENGTH];
 static uint16_t line_index = 0;
 static bool line_ready = false;
 static uint32_t last_char_time = 0;
+
+/* Add SD card printing state */
+static bool sd_printing = false;
+static uint32_t last_sd_read_time = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 static void process_special_command(const char *line);
@@ -54,10 +61,34 @@ bool uart_commands_init(uart_id_t uart_id_param)
     line_index = 0;
     line_ready = false;
 
+    // Initialize command buffer
+    if (!command_buffer_init())
+    {
+        printf("- ERROR: Failed to initialize command buffer\n");
+        return false;
+    }
+
     // Initialize G-code parser
     if (!parser_init())
     {
         printf("- ERROR: Failed to initialize G-code parser\n");
+        return false;
+    }
+
+    // Initialize SD card G-code reader
+    if (sd_gcode_reader_init())
+    {
+        printf("- SD card G-code reader initialized\n");
+    }
+    else
+    {
+        printf("- WARNING: SD card G-code reader initialization failed\n");
+    }
+
+    // Initialize G-code move buffer
+    if (!gcode_move_buffer_init())
+    {
+        printf("- ERROR: Failed to initialize G-code move buffer\n");
         return false;
     }
 
@@ -89,6 +120,66 @@ static void uart_rx_callback(void)
  */
 void uart_commands_update(void)
 {
+    // Update command buffer (processes buffered commands)
+    command_buffer_update();
+
+    // Update G-code move buffer
+    gcode_move_buffer_update();
+
+    // Handle SD card printing - continuously read and buffer moves
+    if (sd_printing && sd_gcode_reader_is_ready())
+    {
+        uint32_t current_time = HAL_GetTick();
+
+        // Read new lines every 100ms or when buffer has space
+        if (current_time - last_sd_read_time > 100 &&
+            gcode_move_buffer_get_free_space() > 10)
+        {
+            last_sd_read_time = current_time;
+
+            // Read and buffer multiple lines
+            char sd_line_buffer[SD_GCODE_MAX_LINE_LENGTH];
+            position_t current_pos = kinematics_get_position();
+            parser_state_t *parser_state = parser_get_state();
+
+            int lines_read = 0;
+            while (lines_read < 5 && !sd_gcode_reader_is_eof() &&
+                   gcode_move_buffer_get_free_space() > 5)
+            {
+                sd_gcode_result_t result = sd_gcode_reader_read_line(
+                    sd_line_buffer, sizeof(sd_line_buffer));
+
+                if (result == SD_GCODE_OK)
+                {
+                    gcode_move_buffer_result_t buf_result = gcode_move_buffer_add_from_gcode(
+                        sd_line_buffer, current_pos, parser_state->feedrate,
+                        parser_state->absolute_mode);
+
+                    if (buf_result == GCODE_MOVE_BUFFER_OK)
+                    {
+                        lines_read++;
+                    }
+                    else if (buf_result == GCODE_MOVE_BUFFER_FULL)
+                    {
+                        break; // Buffer full, try later
+                    }
+                }
+                else if (result == SD_GCODE_END_OF_FILE)
+                {
+                    sd_printing = false;
+                    sd_gcode_reader_close();
+                    uart_commands_send_response("| SD card printing completed |");
+                    break;
+                }
+                else
+                {
+                    printf("SD read error: %d\n", result);
+                    break;
+                }
+            }
+        }
+    }
+
     // Check for incoming characters from BSP UART
     static uint32_t last_debug = 0;
     bool chars_available = BSP_UART_data_ready(uart_id);
@@ -136,10 +227,10 @@ void uart_commands_update(void)
 
         printf("- Processing command: '%s' (len=%d)\n", line_buffer, strlen(line_buffer));
 
-        // Emergency stop handling
+        // Emergency stop handling - bypass buffer
         if (strncmp(line_buffer, "M112", 4) == 0 || strncmp(line_buffer, "stop", 4) == 0)
         {
-            uart_commands_emergency_stop();
+            command_buffer_add_emergency(line_buffer);
             reset_line_buffer();
             current_state = UART_CMD_STATE_IDLE;
             return;
@@ -148,11 +239,43 @@ void uart_commands_update(void)
         // Check if it's a special command or G-code
         if (is_special_command(line_buffer))
         {
-            process_special_command(line_buffer);
+            // Some special commands should be executed immediately
+            if (strncmp(line_buffer, "help", 4) == 0 ||
+                strncmp(line_buffer, "status", 6) == 0 ||
+                strncmp(line_buffer, "pos", 3) == 0 ||
+                strncmp(line_buffer, "stats", 5) == 0 ||
+                strncmp(line_buffer, "motors", 6) == 0 ||
+                strncmp(line_buffer, "limits", 6) == 0)
+            {
+                // Execute immediately for informational commands
+                process_special_command(line_buffer);
+            }
+            else
+            {
+                // Buffer other special commands
+                if (!command_buffer_add(line_buffer, false, false))
+                {
+                    send_error_response("Failed to add command to buffer");
+                    stats.errors_count++;
+                }
+                else
+                {
+                    send_ok_response(); // Acknowledge command was buffered
+                }
+            }
         }
         else
         {
-            process_gcode_command(line_buffer);
+            // Buffer G-code commands
+            if (!command_buffer_add(line_buffer, true, false))
+            {
+                send_error_response("Failed to add G-code to buffer");
+                stats.errors_count++;
+            }
+            else
+            {
+                send_ok_response(); // Acknowledge command was buffered
+            }
         }
 
         stats.commands_executed++;
@@ -421,8 +544,15 @@ static void process_special_command(const char *line)
         uart_commands_send_response("|  home - Home all axes              |");
         uart_commands_send_response("|  pos - Show current position       |");
         uart_commands_send_response("|  stats - Show command statistics   |");
+        uart_commands_send_response("|  buffer - Show buffer status       |");
+        uart_commands_send_response("|  pause - Pause command execution   |");
+        uart_commands_send_response("|  resume - Resume command execution |");
+        uart_commands_send_response("|  clear - Clear command buffer      |");
         uart_commands_send_response("|  motors - Show motor status        |");
         uart_commands_send_response("|  limits - Show limit switch status |");
+        uart_commands_send_response("|  sdlist - List G-code files on SD  |");
+        uart_commands_send_response("|  sdprint <file> - Print from SD    |");
+        uart_commands_send_response("|  sdstatus - Show SD card status    |");
         uart_commands_send_response("|  G-code - commands also supported  |");
         uart_commands_send_response("|------------------------------------|");
         send_ok_response();
@@ -484,48 +614,157 @@ static void process_special_command(const char *line)
     }
     else if (strncmp(line, "stats", 5) == 0)
     {
+        cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
         uart_commands_send_response_printf("| Lines: %lu |", stats.lines_processed);
         uart_commands_send_response_printf("| Commands: %lu |", stats.commands_executed);
         uart_commands_send_response_printf("| Errors: %lu |", stats.errors_count);
         uart_commands_send_response_printf("| Overflows: %lu |", stats.buffer_overflows);
+        uart_commands_send_response_printf("| Buffer: %d/%d |", buf_stats->current_count, CMD_BUFFER_SIZE);
+        uart_commands_send_response_printf("| Buffer Executed: %lu |", buf_stats->commands_executed);
+        uart_commands_send_response_printf("| Buffer Errors: %lu |", buf_stats->execution_errors);
         send_ok_response();
     }
-    else if (strncmp(line, "motors", 6) == 0)
+    else if (strncmp(line, "buffer", 6) == 0)
     {
-        uart_commands_send_response("| Motor Status: |");
-        uart_commands_send_response_printf("| X Motor: State %d, Steps %lu |",
-                                           stepper_motor_get_state(0), stepper_motor_get_completed_steps(0));
-        uart_commands_send_response_printf("| Y Motor: State %d, Steps %lu |",
-                                           stepper_motor_get_state(1), stepper_motor_get_completed_steps(1));
+        cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
+        cmd_buffer_state_t buf_state = command_buffer_get_state();
+        uart_commands_send_response("| Command Buffer Status: |");
+        uart_commands_send_response_printf("| State: %d |", buf_state);
+        uart_commands_send_response_printf("| Commands: %d/%d |", buf_stats->current_count, CMD_BUFFER_SIZE);
+        uart_commands_send_response_printf("| Free Space: %d |", command_buffer_get_free_space());
+        uart_commands_send_response_printf("| Total Added: %lu |", buf_stats->commands_added);
+        uart_commands_send_response_printf("| Total Executed: %lu |", buf_stats->commands_executed);
+        uart_commands_send_response_printf("| Max Buffered: %d |", buf_stats->max_count);
         send_ok_response();
     }
-    else if (strncmp(line, "limits", 6) == 0)
+    else if (strncmp(line, "pause", 5) == 0)
     {
-        uart_commands_send_response("| Limit Switch Status: |");
-        uart_commands_send_response_printf("| X_MIN: %s |",
-                                           limit_switch_read(AXIS_X, LIMIT_MIN) == LIMIT_TRIGGERED ? "TRIGGERED" : "OPEN");
-        uart_commands_send_response_printf("| X_MAX: %s |",
-                                           limit_switch_read(AXIS_X, LIMIT_MAX) == LIMIT_TRIGGERED ? "TRIGGERED" : "OPEN");
-        uart_commands_send_response_printf("| Y_MIN: %s |",
-                                           limit_switch_read(AXIS_Y, LIMIT_MIN) == LIMIT_TRIGGERED ? "TRIGGERED" : "OPEN");
-        uart_commands_send_response_printf("| Y_MAX: %s |",
-                                           limit_switch_read(AXIS_Y, LIMIT_MAX) == LIMIT_TRIGGERED ? "TRIGGERED" : "OPEN");
+        command_buffer_pause();
+        uart_commands_send_response("| Command buffer paused |");
         send_ok_response();
     }
-    else if (strncmp(line, "test", 4) == 0)
+    else if (strncmp(line, "resume", 6) == 0)
     {
-        uart_commands_send_response("| Testing coordinated movement... |");
-        position_t test_pos = {10.0f, 10.0f};
-        if (kinematics_move_to(&test_pos, 1200.0f))
+        command_buffer_resume();
+        uart_commands_send_response("| Command buffer resumed |");
+        send_ok_response();
+    }
+    else if (strncmp(line, "clear", 5) == 0)
+    {
+        command_buffer_clear();
+        uart_commands_send_response("| Command buffer cleared |");
+        send_ok_response();
+    }
+    else if (strncmp(line, "sdlist", 6) == 0)
+    {
+        if (sd_gcode_reader_is_ready())
         {
-            uart_commands_send_response("| Test movement started |");
+            char file_list[10][SD_GCODE_MAX_FILENAME_LENGTH];
+            uint32_t file_count = sd_gcode_reader_list_files(file_list, 10);
+
+            uart_commands_send_response("| G-code files on SD card: |");
+            if (file_count == 0)
+            {
+                uart_commands_send_response("| No G-code files found |");
+            }
+            else
+            {
+                for (uint32_t i = 0; i < file_count; i++)
+                {
+                    uart_commands_send_response_printf("| %d: %s |", i + 1, file_list[i]);
+                }
+            }
             send_ok_response();
         }
         else
         {
-            send_error_response("Test movement failed");
+            send_error_response("SD card not ready");
         }
     }
+    else if (strncmp(line, "sdprint", 7) == 0)
+    {
+        // Extract filename
+        const char *filename = line + 7;
+        while (*filename && isspace(*filename))
+            filename++; // Skip spaces
+
+        if (strlen(filename) == 0)
+        {
+            send_error_response("Usage: sdprint <filename>");
+            return;
+        }
+
+        if (!sd_gcode_reader_is_ready())
+        {
+            send_error_response("SD card not ready");
+            return;
+        }
+
+        sd_gcode_result_t result = sd_gcode_reader_open(filename);
+        if (result != SD_GCODE_OK)
+        {
+            send_error_response("Failed to open G-code file");
+            return;
+        }
+
+        uart_commands_send_response_printf("| Starting print: %s |", filename);
+
+        // Start processing G-code moves
+        gcode_move_buffer_set_state(GCODE_MOVE_BUFFER_STATE_PROCESSING);
+        sd_printing = true;
+        last_sd_read_time = 0; // Force immediate read
+
+        // Read and buffer initial moves
+        char line_buffer[SD_GCODE_MAX_LINE_LENGTH];
+        position_t current_pos = kinematics_get_position();
+        parser_state_t *parser_state = parser_get_state();
+
+        int lines_buffered = 0;
+        while (!sd_gcode_reader_is_eof() && lines_buffered < 20 &&
+               !gcode_move_buffer_is_full())
+        {
+            result = sd_gcode_reader_read_line(line_buffer, sizeof(line_buffer));
+            if (result == SD_GCODE_OK)
+            {
+                gcode_move_buffer_result_t buf_result = gcode_move_buffer_add_from_gcode(
+                    line_buffer, current_pos, parser_state->feedrate, parser_state->absolute_mode);
+
+                if (buf_result == GCODE_MOVE_BUFFER_OK)
+                {
+                    lines_buffered++;
+                }
+                else if (buf_result == GCODE_MOVE_BUFFER_FULL)
+                {
+                    break; // Buffer full, will continue later
+                }
+            }
+            else if (result == SD_GCODE_END_OF_FILE)
+            {
+                break;
+            }
+        }
+
+        uart_commands_send_response_printf("| Buffered %d moves |", lines_buffered);
+        send_ok_response();
+    }
+    else if (strncmp(line, "sdstop", 6) == 0)
+    {
+        if (sd_printing)
+        {
+            sd_printing = false;
+            sd_gcode_reader_close();
+            gcode_move_buffer_set_state(GCODE_MOVE_BUFFER_STATE_IDLE);
+            gcode_move_buffer_clear();
+            kinematics_stop();
+            uart_commands_send_response("| SD card printing stopped |");
+        }
+        else
+        {
+            uart_commands_send_response("| No SD card printing active |");
+        }
+        send_ok_response();
+    }
+
     else
     {
         send_error_response("Unknown special command");
@@ -533,59 +772,19 @@ static void process_special_command(const char *line)
 }
 
 /**
- * @brief Process G-code commands
+ * @brief Process G-code commands (now just adds to buffer)
  */
 static void process_gcode_command(const char *line)
 {
-    uart_commands_send_response_printf("| Executing: %s |", line);
-
-    if (parser_process_line(line))
+    // This function is no longer used since G-code is buffered
+    // Keep for backward compatibility but just buffer the command
+    if (!command_buffer_add(line, true, false))
     {
-        // For movement commands, wait for completion with timeout
-        if (line[0] == 'G' && (line[1] == '0' || line[1] == '1'))
-        {
-            uart_commands_send_response("| Movement started, waiting for completion... |");
-
-            uint32_t start_time = HAL_GetTick();
-            uint32_t timeout = 30000; // 30 second timeout
-            uint32_t last_status = 0;
-
-            while (kinematics_get_state() != MOVE_STATE_IDLE)
-            {
-                kinematics_update();
-                stepper_motor_update();
-
-                // Print status every 2 seconds
-                if (HAL_GetTick() - last_status > 2000)
-                {
-                    last_status = HAL_GetTick();
-                    position_t pos = kinematics_get_position();
-                    uart_commands_send_response_printf("| Moving... X=%.2f Y=%.2f |", pos.x, pos.y);
-                }
-
-                // Check for timeout
-                if (HAL_GetTick() - start_time > timeout)
-                {
-                    uart_commands_send_response("| Movement timeout - stopping motors |");
-                    stepper_motor_emergency_stop_all();
-                    kinematics_stop();
-                    send_error_response("Movement timeout");
-                    stats.errors_count++;
-                    return;
-                }
-
-                HAL_Delay(10);
-            }
-
-            uart_commands_send_response("| Movement complete |");
-        }
-
-        send_ok_response();
+        send_error_response("Failed to add G-code to buffer");
     }
     else
     {
-        send_error_response("| G-code execution failed |");
-        stats.errors_count++;
+        send_ok_response();
     }
 }
 
@@ -604,7 +803,7 @@ static void send_error_response(const char *error)
 {
     uart_commands_send_response_printf("|------------------------------------|");
     uart_commands_send_response_printf("| Error: %s |", error);
-    uart_commands_send_response_printf("|------------------------------------|")
+    uart_commands_send_response_printf("|------------------------------------|");
 }
 
 /**

@@ -99,4 +99,10 @@ void uart_commands_emergency_stop(void);
  */
 void uart_commands_clear_error(void);
 
+/**
+ * @brief Check if SD card printing is active
+ * @return true if currently printing from SD card
+ */
+bool uart_commands_is_sd_printing(void);
+
 #endif /* UART_COMMANDS_H */

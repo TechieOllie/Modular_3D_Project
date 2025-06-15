@@ -9,7 +9,8 @@
     "diskio.h": "c",
     "stm32g4_sd.h": "c",
     "stm32g4_gpio.h": "c",
-    "stm32g4_uart.h": "c"
+    "stm32g4_uart.h": "c",
+    "limit_switches.h": "c"
   },
   "remote.extensionKind": {
     "stmicroelectronics.stm32-vscode-extension": [
