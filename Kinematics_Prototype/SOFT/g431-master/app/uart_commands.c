@@ -918,14 +918,14 @@ static void process_emergency_stop(void)
 
     // Stop all motors using emergency stop function
     stepper_motor_emergency_stop_all();
-    
+
     // Stop kinematics
     kinematics_stop();
-    
+
     // Clear buffers
     command_buffer_clear();
     gcode_move_buffer_clear();
-    
+
     // Stop SD card operations
     if (sd_printing)
     {
@@ -936,4 +936,7 @@ static void process_emergency_stop(void)
 
     uart_commands_send_response("|---- EMERGENCY STOP ACTIVATED ----|");
     uart_commands_send_response("|---- ALL MOTORS STOPPED ----|");
+
+    // Make sure to reset the emergency stop detection flag
+    potential_emergency_stop = false;
 }
