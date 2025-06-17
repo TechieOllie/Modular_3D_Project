@@ -348,8 +348,19 @@ static bool execute_next_command(void)
     current_state = CMD_BUFFER_STATE_EXECUTING;
     processing_command = true;
 
-    // Execute the command
-    bool result = parser_process_line(entry->command);
+    bool result = false;
+
+    // Execute the command based on type
+    if (entry->is_gcode)
+    {
+        // For G-code commands, use the parser directly
+        result = parser_process_line(entry->command);
+    }
+    else
+    {
+        // For special commands, use the parser as well
+        result = parser_process_line(entry->command);
+    }
 
     // Update statistics
     stats.commands_executed++;

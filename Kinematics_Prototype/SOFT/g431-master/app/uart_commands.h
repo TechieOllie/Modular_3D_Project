@@ -105,4 +105,10 @@ void uart_commands_clear_error(void);
  */
 bool uart_commands_is_sd_printing(void);
 
+/* Private variables ---------------------------------------------------------*/
+static bool potential_emergency_stop = false;
+
+/* Private function prototypes -----------------------------------------------*/
+static void process_emergency_stop(void);
+
 #endif /* UART_COMMANDS_H */

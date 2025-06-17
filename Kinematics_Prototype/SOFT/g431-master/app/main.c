@@ -84,7 +84,7 @@ void setup_stepper_motors(void)
 
     // X-axis motor using Timer4, Channel 2 on pins PA12(PUL), PB0(DIR) - CORRECTED
     printf("Initializing X motor: PA12(PUL), PB0(DIR), Timer4 CH2\n");
-    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_12, GPIOB, GPIO_PIN_0, TIMER4_ID, TIM_CHANNEL_2, 16);
+    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_12, GPIOB, GPIO_PIN_4, TIMER4_ID, TIM_CHANNEL_2, 16);
 
     // Associate motors with axes for limit switch checking
     stepper_motor_set_axis(X_MOTOR_ID, AXIS_X);
@@ -349,8 +349,8 @@ int main(void)
     stepper_motor_debug_config(Y_MOTOR_ID);
 
     // Wait then run the test
-    HAL_Delay(2000);
-    test_50x50_kinematics();
+    // HAL_Delay(2000);
+    // test_50x50_kinematics();
 
     // Final safety stop
     printf("\n========== TEST COMPLETE ==========\n");

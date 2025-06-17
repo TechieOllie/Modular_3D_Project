@@ -277,7 +277,7 @@ static bool execute_g_command(gcode_command_t *cmd)
 
         // Stop any current movement before starting new one
         kinematics_stop();
-        HAL_Delay(100); // Allow time for stop
+        HAL_Delay(10); // Reduced delay - was causing issues
 
         // Execute move
         if (!kinematics_move_to(&target_pos, feedrate))
@@ -544,21 +544,22 @@ static bool validate_position(float x, float y)
     if (!config)
     {
         // Fallback to default limits if config not available
-        return (x >= 0.0f && x <= 200.0f && y >= 0.0f && y <= 200.0f);
+        printf("Warning: No machine config available, using defaults\n");
+        return (x >= -1.0f && x <= 250.0f && y >= -1.0f && y <= 250.0f);
     }
 
     // Check if position is within configured machine limits
-    bool x_valid = (x >= 0.0f && x <= config->x_max);
-    bool y_valid = (y >= 0.0f && y <= config->y_max);
+    bool x_valid = (x >= -1.0f && x <= config->x_max); // Allow small negative values
+    bool y_valid = (y >= -1.0f && y <= config->y_max); // Allow small negative values
 
     if (!x_valid)
     {
-        printf("X position %.2f out of bounds (0.0 to %.2f)\n", x, config->x_max);
+        printf("X position %.2f out of bounds (-1.0 to %.2f)\n", x, config->x_max);
     }
 
     if (!y_valid)
     {
-        printf("Y position %.2f out of bounds (0.0 to %.2f)\n", y, config->y_max);
+        printf("Y position %.2f out of bounds (-1.0 to %.2f)\n", y, config->y_max);
     }
 
     return x_valid && y_valid;
@@ -569,7 +570,9 @@ static bool validate_position(float x, float y)
  */
 static void send_ok_response(void)
 {
-    printf("ok\n");
+    // Don't send responses from parser when used by command buffer
+    // The calling system will handle responses
+    // printf("ok\n");
 }
 
 /**
@@ -577,7 +580,9 @@ static void send_ok_response(void)
  */
 static void send_error_response(const char *error_msg)
 {
-    printf("Error: %s\n", error_msg);
+    // Don't send responses from parser when used by command buffer
+    // The calling system will handle responses
+    printf("Parser Error: %s\n", error_msg);
 }
 
 /**

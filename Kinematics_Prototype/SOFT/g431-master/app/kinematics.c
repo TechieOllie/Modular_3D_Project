@@ -110,8 +110,15 @@ bool kinematics_move_to(const position_t *target, float feedrate_mm_min)
 
     if (distance < 0.001f) // Very small movement, ignore
     {
-        printf("Movement too small, ignored\n");
+        printf("Movement too small (%.4f mm), ignored\n", distance);
         return true;
+    }
+
+    // Validate target position before moving
+    if (!kinematics_is_position_valid(target))
+    {
+        printf("ERROR: Target position X=%.2f Y=%.2f is out of bounds\n", target->x, target->y);
+        return false;
     }
 
     // Calculate movement time based on feedrate
@@ -236,49 +243,19 @@ bool kinematics_home_all(void)
         return false;
     }
 
-    printf("Starting homing sequence for all axes\n");
+    printf("Starting non-blocking homing sequence for all axes\n");
     current_state = MOVE_STATE_HOMING;
 
-    // Home Y axis first (safer to home Y first)
-    printf(" Homing Y-axis...\n");
-    if (!stepper_motor_home_precision(machine_config.y_motor_id, 2000, 400)) // 2kHz fast, 400Hz slow
+    // Start Y axis homing first (non-blocking)
+    printf("Starting Y-axis homing...\n");
+    if (!stepper_motor_home_precision(machine_config.y_motor_id, 2000, 400))
     {
         printf("ERROR: Failed to start Y axis homing\n");
         current_state = MOVE_STATE_IDLE;
         return false;
     }
 
-    while (stepper_motor_get_state(machine_config.y_motor_id) != MOTOR_STATE_IDLE)
-    {
-        stepper_motor_update();
-        HAL_Delay(10);
-    }
-    printf("Y axis homing complete\n");
-
-    // Home X axis next
-    printf("Homing X-axis...\n");
-    if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400)) // 2kHz fast, 400Hz slow
-    {
-        printf("ERROR: Failed to start X axis homing\n");
-        current_state = MOVE_STATE_IDLE;
-        return false;
-    }
-
-    while (stepper_motor_get_state(machine_config.x_motor_id) != MOTOR_STATE_IDLE)
-    {
-        stepper_motor_update();
-        HAL_Delay(10);
-    }
-    printf("X axis homing complete\n");
-
-    // Set current position to origin after homing
-    current_position.x = 0.0f;
-    current_position.y = 0.0f;
-    target_position = current_position;
-
-    current_state = MOVE_STATE_IDLE;
-    printf("Homing complete\n");
-
+    printf("Y-axis homing started (non-blocking)\n");
     return true;
 }
 
@@ -298,44 +275,28 @@ bool kinematics_home_axis(char axis)
         return false;
     }
 
-    printf("Homing %c axis\n", axis);
+    printf("Starting non-blocking homing for %c axis\n", axis);
     current_state = MOVE_STATE_HOMING;
 
     if (axis == 'X' || axis == 'x')
     {
         if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400))
         {
-            printf("ERROR: Failed to home X axis\n");
+            printf("ERROR: Failed to start X axis homing\n");
             current_state = MOVE_STATE_IDLE;
             return false;
         }
-
-        while (stepper_motor_get_state(machine_config.x_motor_id) != MOTOR_STATE_IDLE)
-        {
-            stepper_motor_update();
-            HAL_Delay(10); // Wait for X motor to finish homing
-        }
-
-        current_position.x = 0.0f; // Reset position after homing
-        target_position.x = 0.0f;
+        printf("X-axis homing started (non-blocking)\n");
     }
     else if (axis == 'Y' || axis == 'y')
     {
-        if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400))
+        if (!stepper_motor_home_precision(machine_config.y_motor_id, 2000, 400))
         {
-            printf("ERROR: Failed to home Y axis\n");
+            printf("ERROR: Failed to start Y axis homing\n");
             current_state = MOVE_STATE_IDLE;
             return false;
         }
-
-        while (stepper_motor_get_state(machine_config.y_motor_id) != MOTOR_STATE_IDLE)
-        {
-            stepper_motor_update();
-            HAL_Delay(10); // Wait for Y motor to finish homing
-        }
-
-        current_position.y = 0.0f; // Reset position after homing
-        target_position.y = 0.0f;
+        printf("Y-axis homing started (non-blocking)\n");
     }
     else
     {
@@ -343,9 +304,6 @@ bool kinematics_home_axis(char axis)
         current_state = MOVE_STATE_IDLE;
         return false;
     }
-
-    current_state = MOVE_STATE_IDLE;
-    printf("%c axis homing complete\n", axis);
 
     return true;
 }
@@ -409,6 +367,7 @@ void kinematics_update(void)
     }
 
     static uint32_t last_update = 0;
+    static uint8_t homing_sequence_step = 0;
     uint32_t now = HAL_GetTick();
 
     // Update every 50ms
@@ -453,24 +412,56 @@ void kinematics_update(void)
 
     case MOVE_STATE_HOMING:
     {
-        // Update homing state
+        // Multi-step homing sequence
         stepper_motor_state_t x_state = stepper_motor_get_state(machine_config.x_motor_id);
         stepper_motor_state_t y_state = stepper_motor_get_state(machine_config.y_motor_id);
 
-        if (x_state == MOTOR_STATE_IDLE && y_state == MOTOR_STATE_IDLE)
+        switch (homing_sequence_step)
         {
-            current_position.x = 0.0f;
-            current_position.y = 0.0f;
-            target_position = current_position;
-            current_state = MOVE_STATE_IDLE;
-            printf("Homing completed\n");
+        case 0: // Y-axis homing in progress
+            if (y_state == MOTOR_STATE_IDLE)
+            {
+                printf("Y-axis homing complete, starting X-axis homing...\n");
+                if (stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400))
+                {
+                    homing_sequence_step = 1;
+                }
+                else
+                {
+                    printf("ERROR: Failed to start X axis homing\n");
+                    current_state = MOVE_STATE_IDLE;
+                    homing_sequence_step = 0;
+                }
+            }
+            break;
+
+        case 1: // X-axis homing in progress
+            if (x_state == MOTOR_STATE_IDLE)
+            {
+                printf("X-axis homing complete - All homing finished\n");
+                current_position.x = 0.0f;
+                current_position.y = 0.0f;
+                target_position = current_position;
+                current_state = MOVE_STATE_IDLE;
+                homing_sequence_step = 0;
+            }
+            break;
+        }
+
+        // Debug output every 2 seconds during homing
+        static uint32_t last_homing_debug = 0;
+        if (now - last_homing_debug > 2000)
+        {
+            last_homing_debug = now;
+            printf("Homing step %d: X_state=%d, Y_state=%d\n", homing_sequence_step, x_state, y_state);
         }
         break;
     }
 
     case MOVE_STATE_IDLE:
     default:
-        // Nothing to do in idle state
+        // Reset homing sequence step when idle
+        homing_sequence_step = 0;
         break;
     }
 }

@@ -9,15 +9,12 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "uart_commands.h"
-#include "command_buffer.h" // Add this include
-#include "command_buffer.h" // Add this include
+#include "command_buffer.h"
 #include "parser.h"
 #include "kinematics.h"
 #include "stepper_motor.h"
 #include "limit_switches.h"
 #include "stm32g4_uart.h"
-#include "sd_gcode_reader.h"
-#include "gcode_move_buffer.h"
 #include "sd_gcode_reader.h"
 #include "gcode_move_buffer.h"
 #include <stdio.h>
@@ -46,6 +43,9 @@ static void send_error_response(const char *error);
 static void reset_line_buffer(void);
 static bool is_special_command(const char *line);
 static void uart_rx_callback(void);
+static void process_emergency_stop(void);
+
+/* Add this at the top with other static variables */
 
 /* Public function implementations -------------------------------------------*/
 
@@ -71,34 +71,10 @@ bool uart_commands_init(uart_id_t uart_id_param)
         return false;
     }
 
-    // Initialize command buffer
-    if (!command_buffer_init())
-    {
-        printf("- ERROR: Failed to initialize command buffer\n");
-        return false;
-    }
-
     // Initialize G-code parser
     if (!parser_init())
     {
         printf("- ERROR: Failed to initialize G-code parser\n");
-        return false;
-    }
-
-    // Initialize SD card G-code reader
-    if (sd_gcode_reader_init())
-    {
-        printf("- SD card G-code reader initialized\n");
-    }
-    else
-    {
-        printf("- WARNING: SD card G-code reader initialization failed\n");
-    }
-
-    // Initialize G-code move buffer
-    if (!gcode_move_buffer_init())
-    {
-        printf("- ERROR: Failed to initialize G-code move buffer\n");
         return false;
     }
 
@@ -254,12 +230,31 @@ void uart_commands_update(void)
 
         printf("- Processing command: '%s' (len=%d)\n", line_buffer, strlen(line_buffer));
 
-        // Emergency stop handling - bypass buffer
-        // Emergency stop handling - bypass buffer
+        // Emergency stop handling - ALWAYS execute immediately regardless of system state
         if (strncmp(line_buffer, "M112", 4) == 0 || strncmp(line_buffer, "stop", 4) == 0)
         {
-            command_buffer_add_emergency(line_buffer);
-            command_buffer_add_emergency(line_buffer);
+            printf("- EMERGENCY STOP COMMAND DETECTED!\n");
+
+            // Force stop all motors using the emergency stop method
+            stepper_motor_emergency_stop_all();
+            kinematics_stop();
+
+            // Clear any buffers
+            command_buffer_clear();
+            gcode_move_buffer_clear();
+
+            // Stop SD printing if active
+            if (sd_printing)
+            {
+                sd_printing = false;
+                sd_gcode_reader_close();
+                gcode_move_buffer_set_state(GCODE_MOVE_BUFFER_STATE_IDLE);
+            }
+
+            uart_commands_send_response("|---- EMERGENCY STOP ACTIVATED ----|");
+            uart_commands_send_response("|---- ALL MOTORS STOPPED ----|");
+            send_ok_response();
+
             reset_line_buffer();
             current_state = UART_CMD_STATE_IDLE;
             return;
@@ -268,76 +263,24 @@ void uart_commands_update(void)
         // Check if it's a special command or G-code
         if (is_special_command(line_buffer))
         {
-            // Some special commands should be executed immediately
-            if (strncmp(line_buffer, "help", 4) == 0 ||
-                strncmp(line_buffer, "status", 6) == 0 ||
-                strncmp(line_buffer, "pos", 3) == 0 ||
-                strncmp(line_buffer, "stats", 5) == 0 ||
-                strncmp(line_buffer, "motors", 6) == 0 ||
-                strncmp(line_buffer, "limits", 6) == 0)
-            {
-                // Execute immediately for informational commands
-                process_special_command(line_buffer);
-            }
-            else
-            {
-                // Buffer other special commands
-                if (!command_buffer_add(line_buffer, false, false))
-                {
-                    send_error_response("Failed to add command to buffer");
-                    stats.errors_count++;
-                }
-                else
-                {
-                    send_ok_response(); // Acknowledge command was buffered
-                }
-            }
-            // Some special commands should be executed immediately
-            if (strncmp(line_buffer, "help", 4) == 0 ||
-                strncmp(line_buffer, "status", 6) == 0 ||
-                strncmp(line_buffer, "pos", 3) == 0 ||
-                strncmp(line_buffer, "stats", 5) == 0 ||
-                strncmp(line_buffer, "motors", 6) == 0 ||
-                strncmp(line_buffer, "limits", 6) == 0)
-            {
-                // Execute immediately for informational commands
-                process_special_command(line_buffer);
-            }
-            else
-            {
-                // Buffer other special commands
-                if (!command_buffer_add(line_buffer, false, false))
-                {
-                    send_error_response("Failed to add command to buffer");
-                    stats.errors_count++;
-                }
-                else
-                {
-                    send_ok_response(); // Acknowledge command was buffered
-                }
-            }
+            // ALL special commands should be executed immediately, not buffered
+            printf("- Executing special command immediately: '%s'\n", line_buffer);
+            process_special_command(line_buffer);
         }
         else
         {
-            // Buffer G-code commands
-            if (!command_buffer_add(line_buffer, true, false))
+            // For G-code commands, execute them immediately using the parser
+            // This bypasses the command buffer for direct G-code execution
+            printf("- Executing G-code directly: '%s'\n", line_buffer);
+
+            if (parser_process_line(line_buffer))
             {
-                send_error_response("Failed to add G-code to buffer");
-                stats.errors_count++;
+                send_ok_response();
             }
             else
             {
-                send_ok_response(); // Acknowledge command was buffered
-            }
-            // Buffer G-code commands
-            if (!command_buffer_add(line_buffer, true, false))
-            {
-                send_error_response("Failed to add G-code to buffer");
+                send_error_response("G-code execution failed");
                 stats.errors_count++;
-            }
-            else
-            {
-                send_ok_response(); // Acknowledge command was buffered
             }
         }
 
@@ -359,6 +302,36 @@ void uart_commands_update(void)
  */
 void uart_commands_process_char(char c)
 {
+    // Check for emergency stop command at the very beginning
+    if (line_index == 0 && c == 'M')
+    {
+        potential_emergency_stop = true;
+    }
+    else if (potential_emergency_stop && line_index <= 3)
+    {
+        // Check for "M112"
+        if ((line_index == 1 && c == '1') ||
+            (line_index == 2 && c == '1') ||
+            (line_index == 3 && c == '2'))
+        {
+            // Continue checking
+        }
+        else
+        {
+            potential_emergency_stop = false;
+        }
+
+        // If we have "M112", execute emergency stop immediately
+        if (potential_emergency_stop && line_index == 3 && c == '2')
+        {
+            printf("- EMERGENCY STOP DETECTED FROM PARTIAL COMMAND!\n");
+            process_emergency_stop();
+            reset_line_buffer();
+            return;
+        }
+    }
+
+    // Regular character processing
     printf("- Processing char: '%c' (0x%02X), line_index=%d\n",
            (c >= 32 && c <= 126) ? c : '.', (uint8_t)c, line_index);
 
@@ -571,6 +544,14 @@ static bool is_special_command(const char *line)
             strncmp(line, "motors", 6) == 0 ||
             strncmp(line, "limits", 6) == 0 ||
             strncmp(line, "test", 4) == 0 ||
+            strncmp(line, "buffer", 6) == 0 ||
+            strncmp(line, "pause", 5) == 0 ||
+            strncmp(line, "resume", 6) == 0 ||
+            strncmp(line, "clear", 5) == 0 ||
+            strncmp(line, "sdlist", 6) == 0 ||
+            strncmp(line, "sdprint", 7) == 0 ||
+            strncmp(line, "sdstop", 6) == 0 ||
+            strncmp(line, "sdstatus", 8) == 0 ||
             line[0] == '/' || line[0] == '#');
 }
 
@@ -611,15 +592,8 @@ static void process_special_command(const char *line)
         uart_commands_send_response("|  pause - Pause command execution   |");
         uart_commands_send_response("|  resume - Resume command execution |");
         uart_commands_send_response("|  clear - Clear command buffer      |");
-        uart_commands_send_response("|  buffer - Show buffer status       |");
-        uart_commands_send_response("|  pause - Pause command execution   |");
-        uart_commands_send_response("|  resume - Resume command execution |");
-        uart_commands_send_response("|  clear - Clear command buffer      |");
         uart_commands_send_response("|  motors - Show motor status        |");
         uart_commands_send_response("|  limits - Show limit switch status |");
-        uart_commands_send_response("|  sdlist - List G-code files on SD  |");
-        uart_commands_send_response("|  sdprint <file> - Print from SD    |");
-        uart_commands_send_response("|  sdstatus - Show SD card status    |");
         uart_commands_send_response("|  sdlist - List G-code files on SD  |");
         uart_commands_send_response("|  sdprint <file> - Print from SD    |");
         uart_commands_send_response("|  sdstatus - Show SD card status    |");
@@ -834,7 +808,47 @@ static void process_special_command(const char *line)
         }
         send_ok_response();
     }
-
+    else if (strncmp(line, "sdstatus", 8) == 0)
+    {
+        if (sd_gcode_reader_is_ready())
+        {
+            if (sd_printing)
+            {
+                sd_gcode_file_info_t *info = sd_gcode_reader_get_info();
+                if (info && info->is_open)
+                {
+                    uart_commands_send_response_printf("| Printing: %s |", info->filename);
+                    uart_commands_send_response_printf("| Progress: %d%% |", info->progress_percent);
+                    uart_commands_send_response_printf("| Lines: %lu |", info->lines_processed);
+                }
+                else
+                {
+                    uart_commands_send_response("| SD printing active but no file info |");
+                }
+            }
+            else
+            {
+                uart_commands_send_response("| SD card ready, not printing |");
+            }
+        }
+        else
+        {
+            uart_commands_send_response("| SD card not ready |");
+        }
+        send_ok_response();
+    }
+    else if (strncmp(line, "motors", 6) == 0)
+    {
+        uart_commands_send_response("| Motor Status: |");
+        uart_commands_send_response("| Not implemented |");
+        send_ok_response();
+    }
+    else if (strncmp(line, "limits", 6) == 0)
+    {
+        uart_commands_send_response("| Limit Switch Status: |");
+        uart_commands_send_response("| Not implemented |");
+        send_ok_response();
+    }
     else
     {
         send_error_response("Unknown special command");
@@ -842,19 +856,20 @@ static void process_special_command(const char *line)
 }
 
 /**
- * @brief Process G-code commands (now just adds to buffer)
+ * @brief Process G-code commands (now executes directly)
  */
 static void process_gcode_command(const char *line)
 {
-    // This function is no longer used since G-code is buffered
-    // Keep for backward compatibility but just buffer the command
-    if (!command_buffer_add(line, true, false))
+    // Execute G-code directly using parser
+    printf("Executing G-code: %s\n", line);
+
+    if (parser_process_line(line))
     {
-        send_error_response("Failed to add G-code to buffer");
+        send_ok_response();
     }
     else
     {
-        send_ok_response();
+        send_error_response("G-code execution failed");
     }
 }
 
@@ -884,4 +899,41 @@ static void reset_line_buffer(void)
     memset(line_buffer, 0, sizeof(line_buffer));
     line_index = 0;
     line_ready = false;
+}
+
+/**
+ * @brief Check if SD card printing is active
+ */
+bool uart_commands_is_sd_printing(void)
+{
+    return sd_printing;
+}
+
+/**
+ * @brief Process emergency stop command
+ */
+static void process_emergency_stop(void)
+{
+    printf("- EMERGENCY STOP ACTIVATED\n");
+
+    // Stop all motors using emergency stop function
+    stepper_motor_emergency_stop_all();
+    
+    // Stop kinematics
+    kinematics_stop();
+    
+    // Clear buffers
+    command_buffer_clear();
+    gcode_move_buffer_clear();
+    
+    // Stop SD card operations
+    if (sd_printing)
+    {
+        sd_printing = false;
+        sd_gcode_reader_close();
+        gcode_move_buffer_set_state(GCODE_MOVE_BUFFER_STATE_IDLE);
+    }
+
+    uart_commands_send_response("|---- EMERGENCY STOP ACTIVATED ----|");
+    uart_commands_send_response("|---- ALL MOTORS STOPPED ----|");
 }

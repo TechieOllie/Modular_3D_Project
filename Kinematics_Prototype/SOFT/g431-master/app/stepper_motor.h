@@ -180,6 +180,13 @@ bool stepper_motor_stop(uint8_t motor_id);
 void stepper_motor_emergency_stop_all(void);
 
 /**
+ * @brief Force stop motor immediately - bypasses all state checking
+ * @param motor_id Motor ID
+ * @return true if successful
+ */
+bool stepper_motor_force_stop(uint8_t motor_id);
+
+/**
  * @brief Get motor state
  * @param motor_id Motor ID
  * @return Current motor state
