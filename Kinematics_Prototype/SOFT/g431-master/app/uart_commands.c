@@ -508,7 +508,7 @@ void uart_commands_send_response_printf(const char *format, ...)
  */
 void uart_commands_emergency_stop(void)
 {
-    stepper_motor_emergency_stop_all();
+    STEPPER_MOTOR_emergency_stop_all();
     kinematics_stop();
     uart_commands_send_response("|---- EMERGENCY STOP ACTIVATED ----|");
 }
@@ -670,15 +670,11 @@ static void process_special_command(const char *line)
     }
     else if (strncmp(line, "buffer", 6) == 0)
     {
-        cmd_buffer_stats_t *buf_stats = command_buffer_get_stats();
-        cmd_buffer_state_t buf_state = command_buffer_get_state();
-        uart_commands_send_response("| Command Buffer Status: |");
-        uart_commands_send_response_printf("| State: %d |", buf_state);
-        uart_commands_send_response_printf("| Commands: %d/%d |", buf_stats->current_count, CMD_BUFFER_SIZE);
-        uart_commands_send_response_printf("| Free Space: %d |", command_buffer_get_free_space());
-        uart_commands_send_response_printf("| Total Added: %lu |", buf_stats->commands_added);
-        uart_commands_send_response_printf("| Total Executed: %lu |", buf_stats->commands_executed);
-        uart_commands_send_response_printf("| Max Buffered: %d |", buf_stats->max_count);
+        uart_commands_send_response("| Motor Status: |");
+        uart_commands_send_response_printf("| X Motor: State %d, Steps %lu |",
+                                           STEPPER_MOTOR_get_state(0), STEPPER_MOTOR_get_completed_steps(0));
+        uart_commands_send_response_printf("| Y Motor: State %d, Steps %lu |",
+                                           STEPPER_MOTOR_get_state(1), STEPPER_MOTOR_get_completed_steps(1));
         send_ok_response();
     }
     else if (strncmp(line, "pause", 5) == 0)
@@ -770,8 +766,8 @@ static void process_special_command(const char *line)
             result = sd_gcode_reader_read_line(line_buffer, sizeof(line_buffer));
             if (result == SD_GCODE_OK)
             {
-                gcode_move_buffer_result_t buf_result = gcode_move_buffer_add_from_gcode(
-                    line_buffer, current_pos, parser_state->feedrate, parser_state->absolute_mode);
+                kinematics_update();
+                STEPPER_MOTOR_update();
 
                 if (buf_result == GCODE_MOVE_BUFFER_OK)
                 {
@@ -779,7 +775,12 @@ static void process_special_command(const char *line)
                 }
                 else if (buf_result == GCODE_MOVE_BUFFER_FULL)
                 {
-                    break; // Buffer full, will continue later
+                    uart_commands_send_response("| Movement timeout - stopping motors |");
+                    STEPPER_MOTOR_emergency_stop_all();
+                    kinematics_stop();
+                    send_error_response("Movement timeout");
+                    stats.errors_count++;
+                    return;
                 }
             }
             else if (result == SD_GCODE_END_OF_FILE)

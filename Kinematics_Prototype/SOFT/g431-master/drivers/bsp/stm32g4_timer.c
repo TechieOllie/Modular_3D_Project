@@ -451,22 +451,18 @@ void BSP_TIMER_set_period_with_same_duty(timer_id_t timer_id, uint16_t TIM_CHANN
  */
 __weak void TIMER1_user_handler_it(void)
 {
-	stepper_motor_timer_interrupt(TIMER1_ID);
 }
 
 __weak void TIMER2_user_handler_it(void)
 {
-	stepper_motor_timer_interrupt(TIMER2_ID);
 }
 
 __weak void TIMER3_user_handler_it(void)
 {
-	stepper_motor_timer_interrupt(TIMER3_ID);
 }
 
 __weak void TIMER4_user_handler_it(void)
 {
-	stepper_motor_timer_interrupt(TIMER4_ID);
 }
 
 __weak void TIMER6_user_handler_it(void)

@@ -71,36 +71,40 @@ void setup_stepper_motors(void)
     printf("Setting up stepper motors with acceleration profiles...\n");
 
     // Initialize stepper motor system
-    if (!stepper_motor_system_init())
+    if (!STEPPER_MOTOR_system_init())
     {
         printf("ERROR: Failed to initialize stepper motor system!\n");
         return;
     }
 
-    // Initialize motors with correct pin assignments
-    // Y-axis motor using Timer1, Channel 3 on pins PA10(PUL), PA9(DIR)
-    printf("Initializing Y motor: PA10(PUL), PA9(DIR), Timer1 CH3\n");
-    stepper_motor_init(Y_MOTOR_ID, GPIOA, GPIO_PIN_10, GPIOA, GPIO_PIN_9, TIMER1_ID, TIM_CHANNEL_3, 16);
+    // Initialize motors with correct pin assignments using new interface
+    // Y-axis motor using pins PA10(PUL), PA9(DIR)
+    printf("Initializing Y motor: PA10(PUL), PA9(DIR)\n");
+    STEPPER_MOTOR_configure(Y_MOTOR_ID, GPIOA, 10, GPIOA, 9, NULL, 0, 16);
 
-    // X-axis motor using Timer4, Channel 2 on pins PA12(PUL), PB0(DIR) - CORRECTED
-    printf("Initializing X motor: PA12(PUL), PB0(DIR), Timer4 CH2\n");
-    stepper_motor_init(X_MOTOR_ID, GPIOA, GPIO_PIN_12, GPIOB, GPIO_PIN_4, TIMER4_ID, TIM_CHANNEL_2, 16);
+    // X-axis motor using pins PA12(PUL), PB0(DIR) - CORRECTED
+    printf("Initializing X motor: PA12(PUL), PB0(DIR)\n");
+    STEPPER_MOTOR_configure(X_MOTOR_ID, GPIOA, 12, GPIOB, 0, NULL, 0, 16);
+
+    // Enable motors
+    STEPPER_MOTOR_enable(X_MOTOR_ID, true);
+    STEPPER_MOTOR_enable(Y_MOTOR_ID, true);
 
     // Associate motors with axes for limit switch checking
-    stepper_motor_set_axis(X_MOTOR_ID, AXIS_X);
-    stepper_motor_set_axis(Y_MOTOR_ID, AXIS_Y);
+    STEPPER_MOTOR_set_axis(X_MOTOR_ID, AXIS_X);
+    STEPPER_MOTOR_set_axis(Y_MOTOR_ID, AXIS_Y);
 
     // Disable limit checking for initial testing
-    stepper_motor_enable_limit_check(X_MOTOR_ID, false);
-    stepper_motor_enable_limit_check(Y_MOTOR_ID, false);
+    STEPPER_MOTOR_enable_limit_check(X_MOTOR_ID, false);
+    STEPPER_MOTOR_enable_limit_check(Y_MOTOR_ID, false);
 
     // Set acceleration parameters for smooth movement (6-12kHz range)
-    stepper_motor_set_acceleration(X_MOTOR_ID, 8000, 10000); // 8000 steps/sec², max 10kHz
-    stepper_motor_set_acceleration(Y_MOTOR_ID, 8000, 10000); // 8000 steps/sec², max 10kHz
+    STEPPER_MOTOR_set_acceleration(X_MOTOR_ID, 8000, 10000); // 8000 steps/sec², max 10kHz
+    STEPPER_MOTOR_set_acceleration(Y_MOTOR_ID, 8000, 10000); // 8000 steps/sec², max 10kHz
 
     // Enable acceleration profiles
-    stepper_motor_enable_acceleration(X_MOTOR_ID, true);
-    stepper_motor_enable_acceleration(Y_MOTOR_ID, true);
+    STEPPER_MOTOR_enable_acceleration(X_MOTOR_ID, true);
+    STEPPER_MOTOR_enable_acceleration(Y_MOTOR_ID, true);
 
     printf("Stepper motors initialized with acceleration profiles and 6-12kHz operation\n");
 }
@@ -135,26 +139,26 @@ void test_50x50_kinematics(void)
 
     // Debug motor configurations first
     printf("=== Motor Configuration Debug ===\n");
-    stepper_motor_debug_config(X_MOTOR_ID);
-    stepper_motor_debug_config(Y_MOTOR_ID);
+    STEPPER_MOTOR_debug_config(X_MOTOR_ID);
+    STEPPER_MOTOR_debug_config(Y_MOTOR_ID);
 
     // Test individual motor movements with acceleration
     printf("=== Testing Accelerated Motor Movements ===\n");
 
     // Test X motor movement with acceleration
     printf("Testing X motor: 1500 steps with acceleration to 9000 Hz\n");
-    if (stepper_motor_move_accel(X_MOTOR_ID, 1500, 9000, MOTOR_DIR_CLOCKWISE))
+    if (STEPPER_MOTOR_move_accel(X_MOTOR_ID, 1500, 9000, MOTOR_DIR_CLOCKWISE))
     {
         uint32_t start_time = HAL_GetTick();
         uint32_t last_progress = 0;
         uint32_t last_completed = 0;
         uint32_t stuck_counter = 0;
 
-        while (stepper_motor_get_state(X_MOTOR_ID) != MOTOR_STATE_IDLE)
+        while (STEPPER_MOTOR_get_state(X_MOTOR_ID) != MOTOR_STATE_IDLE)
         {
-            stepper_motor_update();
+            STEPPER_MOTOR_update();
 
-            uint32_t completed = stepper_motor_get_completed_steps(X_MOTOR_ID);
+            uint32_t completed = STEPPER_MOTOR_get_completed_steps(X_MOTOR_ID);
 
             // Check if motor is stuck (not progressing)
             if (completed == last_completed)
@@ -163,7 +167,7 @@ void test_50x50_kinematics(void)
                 if (stuck_counter > 100) // 1 second of no progress
                 {
                     printf("X motor appears stuck at %lu steps, forcing stop\n", completed);
-                    stepper_motor_stop(X_MOTOR_ID);
+                    STEPPER_MOTOR_stop(X_MOTOR_ID);
                     break;
                 }
             }
@@ -177,8 +181,8 @@ void test_50x50_kinematics(void)
             if (HAL_GetTick() - last_progress > 1000)
             {
                 last_progress = HAL_GetTick();
-                uint32_t frequency = stepper_motor_get_current_frequency(X_MOTOR_ID);
-                stepper_motor_state_t state = stepper_motor_get_state(X_MOTOR_ID);
+                uint32_t frequency = STEPPER_MOTOR_get_current_frequency(X_MOTOR_ID);
+                stepper_motor_state_t state = STEPPER_MOTOR_get_state(X_MOTOR_ID);
 
                 printf("X: %lu/1500 steps (%.1f%%), %lu Hz, state %d\n",
                        completed, (float)completed * 100.0f / 1500.0f, frequency, state);
@@ -187,7 +191,7 @@ void test_50x50_kinematics(void)
                 if (completed >= 1500)
                 {
                     printf("X motor reached target steps, forcing stop\n");
-                    stepper_motor_stop(X_MOTOR_ID);
+                    STEPPER_MOTOR_stop(X_MOTOR_ID);
                     break;
                 }
             }
@@ -195,15 +199,15 @@ void test_50x50_kinematics(void)
             if (HAL_GetTick() - start_time > 20000) // 20s timeout
             {
                 printf("X motor timeout after %lu ms! Steps: %lu\n", HAL_GetTick() - start_time, completed);
-                stepper_motor_stop(X_MOTOR_ID);
+                STEPPER_MOTOR_stop(X_MOTOR_ID);
                 break;
             }
             HAL_Delay(10);
         }
 
         // Final status
-        uint32_t final_steps = stepper_motor_get_completed_steps(X_MOTOR_ID);
-        stepper_motor_state_t final_state = stepper_motor_get_state(X_MOTOR_ID);
+        uint32_t final_steps = STEPPER_MOTOR_get_completed_steps(X_MOTOR_ID);
+        stepper_motor_state_t final_state = STEPPER_MOTOR_get_state(X_MOTOR_ID);
         printf("X motor test completed - Final steps: %lu, State: %d\n", final_steps, final_state);
     }
     else
@@ -212,23 +216,23 @@ void test_50x50_kinematics(void)
     }
 
     // Ensure X motor is fully stopped
-    stepper_motor_stop(X_MOTOR_ID);
+    STEPPER_MOTOR_stop(X_MOTOR_ID);
     HAL_Delay(1000);
 
     // Test Y motor movement with acceleration
     printf("Testing Y motor: 1500 steps with acceleration to 8500 Hz\n");
-    if (stepper_motor_move_accel(Y_MOTOR_ID, 1500, 8500, MOTOR_DIR_CLOCKWISE))
+    if (STEPPER_MOTOR_move_accel(Y_MOTOR_ID, 1500, 8500, MOTOR_DIR_CLOCKWISE))
     {
         uint32_t start_time = HAL_GetTick();
         uint32_t last_progress = 0;
         uint32_t last_completed = 0;
         uint32_t stuck_counter = 0;
 
-        while (stepper_motor_get_state(Y_MOTOR_ID) != MOTOR_STATE_IDLE)
+        while (STEPPER_MOTOR_get_state(Y_MOTOR_ID) != MOTOR_STATE_IDLE)
         {
-            stepper_motor_update();
+            STEPPER_MOTOR_update();
 
-            uint32_t completed = stepper_motor_get_completed_steps(Y_MOTOR_ID);
+            uint32_t completed = STEPPER_MOTOR_get_completed_steps(Y_MOTOR_ID);
 
             // Check if motor is stuck (not progressing)
             if (completed == last_completed)
@@ -237,7 +241,7 @@ void test_50x50_kinematics(void)
                 if (stuck_counter > 100) // 1 second of no progress
                 {
                     printf("Y motor appears stuck at %lu steps, forcing stop\n", completed);
-                    stepper_motor_stop(Y_MOTOR_ID);
+                    STEPPER_MOTOR_stop(Y_MOTOR_ID);
                     break;
                 }
             }
@@ -251,8 +255,8 @@ void test_50x50_kinematics(void)
             if (HAL_GetTick() - last_progress > 1000)
             {
                 last_progress = HAL_GetTick();
-                uint32_t frequency = stepper_motor_get_current_frequency(Y_MOTOR_ID);
-                stepper_motor_state_t state = stepper_motor_get_state(Y_MOTOR_ID);
+                uint32_t frequency = STEPPER_MOTOR_get_current_frequency(Y_MOTOR_ID);
+                stepper_motor_state_t state = STEPPER_MOTOR_get_state(Y_MOTOR_ID);
 
                 printf("Y: %lu/1500 steps (%.1f%%), %lu Hz, state %d\n",
                        completed, (float)completed * 100.0f / 1500.0f, frequency, state);
@@ -261,7 +265,7 @@ void test_50x50_kinematics(void)
                 if (completed >= 1500)
                 {
                     printf("Y motor reached target steps, forcing stop\n");
-                    stepper_motor_stop(Y_MOTOR_ID);
+                    STEPPER_MOTOR_stop(Y_MOTOR_ID);
                     break;
                 }
             }
@@ -269,15 +273,15 @@ void test_50x50_kinematics(void)
             if (HAL_GetTick() - start_time > 20000) // 20s timeout
             {
                 printf("Y motor timeout after %lu ms! Steps: %lu\n", HAL_GetTick() - start_time, completed);
-                stepper_motor_stop(Y_MOTOR_ID);
+                STEPPER_MOTOR_stop(Y_MOTOR_ID);
                 break;
             }
             HAL_Delay(10);
         }
 
         // Final status
-        uint32_t final_steps = stepper_motor_get_completed_steps(Y_MOTOR_ID);
-        stepper_motor_state_t final_state = stepper_motor_get_state(Y_MOTOR_ID);
+        uint32_t final_steps = STEPPER_MOTOR_get_completed_steps(Y_MOTOR_ID);
+        stepper_motor_state_t final_state = STEPPER_MOTOR_get_state(Y_MOTOR_ID);
         printf("Y motor test completed - Final steps: %lu, State: %d\n", final_steps, final_state);
     }
     else
@@ -288,8 +292,8 @@ void test_50x50_kinematics(void)
     printf("Accelerated stepper motor test complete\n");
 
     // Ensure both motors are stopped before returning
-    stepper_motor_stop(X_MOTOR_ID);
-    stepper_motor_stop(Y_MOTOR_ID);
+    STEPPER_MOTOR_stop(X_MOTOR_ID);
+    STEPPER_MOTOR_stop(Y_MOTOR_ID);
     HAL_Delay(1000);
 
     printf("Both motors confirmed stopped\n");
@@ -345,8 +349,8 @@ int main(void)
 
     // Debug motor configurations before testing
     printf("=== Initial Motor Debug ===\n");
-    stepper_motor_debug_config(X_MOTOR_ID);
-    stepper_motor_debug_config(Y_MOTOR_ID);
+    STEPPER_MOTOR_debug_config(X_MOTOR_ID);
+    STEPPER_MOTOR_debug_config(Y_MOTOR_ID);
 
     // Wait then run the test
     // HAL_Delay(2000);
@@ -354,7 +358,7 @@ int main(void)
 
     // Final safety stop
     printf("\n========== TEST COMPLETE ==========\n");
-    stepper_motor_emergency_stop_all();
+    STEPPER_MOTOR_emergency_stop_all();
 
     printf("\n========== ENTERING MAIN LOOP ==========\n");
     printf("Send commands via UART (type 'help' for available commands)...\n");
@@ -369,8 +373,7 @@ int main(void)
         // Update systems
         uart_commands_update(); // Process incoming commands
         kinematics_update();
-        stepper_motor_update();
-        gcode_move_buffer_update(); // Process G-code moves
+        STEPPER_MOTOR_update();
 
         // Update parser position periodically
         if (HAL_GetTick() - last_pos_update > 100) // Every 100ms
