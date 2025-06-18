@@ -170,7 +170,7 @@ bool kinematics_move_to(const position_t *target, float feedrate_mm_min)
 
     if (x_steps > 0)
     {
-        x_started = stepper_motor_move_accel(machine_config.x_motor_id, x_steps, x_freq, x_dir);
+        x_started = STEPPER_MOTOR_move_accel(machine_config.x_motor_id, x_steps, x_freq, x_dir);
         if (!x_started)
         {
             printf("Failed to start X motor\n");
@@ -183,7 +183,7 @@ bool kinematics_move_to(const position_t *target, float feedrate_mm_min)
 
     if (y_steps > 0)
     {
-        y_started = stepper_motor_move_accel(machine_config.y_motor_id, y_steps, y_freq, y_dir);
+        y_started = STEPPER_MOTOR_move_accel(machine_config.y_motor_id, y_steps, y_freq, y_dir);
         if (!y_started)
         {
             printf("Failed to start Y motor\n");
@@ -197,8 +197,8 @@ bool kinematics_move_to(const position_t *target, float feedrate_mm_min)
     if (!x_started || !y_started)
     {
         // Stop any motors that did start
-        stepper_motor_stop(machine_config.x_motor_id);
-        stepper_motor_stop(machine_config.y_motor_id);
+        STEPPER_MOTOR_stop(machine_config.x_motor_id);
+        STEPPER_MOTOR_stop(machine_config.y_motor_id);
         current_state = MOVE_STATE_IDLE;
         return false;
     }
@@ -246,16 +246,46 @@ bool kinematics_home_all(void)
     printf("Starting non-blocking homing sequence for all axes\n");
     current_state = MOVE_STATE_HOMING;
 
-    // Start Y axis homing first (non-blocking)
-    printf("Starting Y-axis homing...\n");
-    if (!stepper_motor_home_precision(machine_config.y_motor_id, 2000, 400))
+    // Home Y axis first (safer to home Y first)
+    printf(" Homing Y-axis...\n");
+    if (!STEPPER_MOTOR_home_precision(machine_config.y_motor_id, 2000, 400)) // 2kHz fast, 400Hz slow
     {
         printf("ERROR: Failed to start Y axis homing\n");
         current_state = MOVE_STATE_IDLE;
         return false;
     }
 
-    printf("Y-axis homing started (non-blocking)\n");
+    while (STEPPER_MOTOR_get_state(machine_config.y_motor_id) != MOTOR_STATE_IDLE)
+    {
+        STEPPER_MOTOR_update();
+        HAL_Delay(10);
+    }
+    printf("Y axis homing complete\n");
+
+    // Home X axis next
+    printf("Homing X-axis...\n");
+    if (!STEPPER_MOTOR_home_precision(machine_config.x_motor_id, 2000, 400)) // 2kHz fast, 400Hz slow
+    {
+        printf("ERROR: Failed to start X axis homing\n");
+        current_state = MOVE_STATE_IDLE;
+        return false;
+    }
+
+    while (STEPPER_MOTOR_get_state(machine_config.x_motor_id) != MOTOR_STATE_IDLE)
+    {
+        STEPPER_MOTOR_update();
+        HAL_Delay(10);
+    }
+    printf("X axis homing complete\n");
+
+    // Set current position to origin after homing
+    current_position.x = 0.0f;
+    current_position.y = 0.0f;
+    target_position = current_position;
+
+    current_state = MOVE_STATE_IDLE;
+    printf("Homing complete\n");
+
     return true;
 }
 
@@ -280,23 +310,39 @@ bool kinematics_home_axis(char axis)
 
     if (axis == 'X' || axis == 'x')
     {
-        if (!stepper_motor_home_precision(machine_config.x_motor_id, 2000, 400))
+        if (!STEPPER_MOTOR_home_precision(machine_config.x_motor_id, 2000, 400))
         {
             printf("ERROR: Failed to start X axis homing\n");
             current_state = MOVE_STATE_IDLE;
             return false;
         }
-        printf("X-axis homing started (non-blocking)\n");
+
+        while (STEPPER_MOTOR_get_state(machine_config.x_motor_id) != MOTOR_STATE_IDLE)
+        {
+            STEPPER_MOTOR_update();
+            HAL_Delay(10); // Wait for X motor to finish homing
+        }
+
+        current_position.x = 0.0f; // Reset position after homing
+        target_position.x = 0.0f;
     }
     else if (axis == 'Y' || axis == 'y')
     {
-        if (!stepper_motor_home_precision(machine_config.y_motor_id, 2000, 400))
+        if (!STEPPER_MOTOR_home_precision(machine_config.y_motor_id, 2000, 400))
         {
             printf("ERROR: Failed to start Y axis homing\n");
             current_state = MOVE_STATE_IDLE;
             return false;
         }
-        printf("Y-axis homing started (non-blocking)\n");
+
+        while (STEPPER_MOTOR_get_state(machine_config.y_motor_id) != MOTOR_STATE_IDLE)
+        {
+            STEPPER_MOTOR_update();
+            HAL_Delay(10); // Wait for Y motor to finish homing
+        }
+
+        current_position.y = 0.0f; // Reset position after homing
+        target_position.y = 0.0f;
     }
     else
     {
@@ -350,8 +396,8 @@ void kinematics_stop(void)
     printf("Emergency stop - stopping all motors\n");
 
     // Stop both motors
-    stepper_motor_stop(machine_config.x_motor_id);
-    stepper_motor_stop(machine_config.y_motor_id);
+    STEPPER_MOTOR_stop(machine_config.x_motor_id);
+    STEPPER_MOTOR_stop(machine_config.y_motor_id);
 
     current_state = MOVE_STATE_IDLE;
 }
@@ -382,8 +428,8 @@ void kinematics_update(void)
     case MOVE_STATE_MOVING:
     {
         // Check if both motors have completed their moves
-        stepper_motor_state_t x_state = stepper_motor_get_state(machine_config.x_motor_id);
-        stepper_motor_state_t y_state = stepper_motor_get_state(machine_config.y_motor_id);
+        stepper_motor_state_t x_state = STEPPER_MOTOR_get_state(machine_config.x_motor_id);
+        stepper_motor_state_t y_state = STEPPER_MOTOR_get_state(machine_config.y_motor_id);
 
         bool x_done = (x_state == MOTOR_STATE_IDLE);
         bool y_done = (y_state == MOTOR_STATE_IDLE);
@@ -393,8 +439,8 @@ void kinematics_update(void)
         if (now - last_debug > 1000)
         {
             last_debug = now;
-            uint32_t x_completed = stepper_motor_get_completed_steps(machine_config.x_motor_id);
-            uint32_t y_completed = stepper_motor_get_completed_steps(machine_config.y_motor_id);
+            uint32_t x_completed = STEPPER_MOTOR_get_completed_steps(machine_config.x_motor_id);
+            uint32_t y_completed = STEPPER_MOTOR_get_completed_steps(machine_config.y_motor_id);
             printf("Movement progress - X: %lu steps (state %d), Y: %lu steps (state %d)\n",
                    x_completed, x_state, y_completed, y_state);
         }
@@ -412,9 +458,9 @@ void kinematics_update(void)
 
     case MOVE_STATE_HOMING:
     {
-        // Multi-step homing sequence
-        stepper_motor_state_t x_state = stepper_motor_get_state(machine_config.x_motor_id);
-        stepper_motor_state_t y_state = stepper_motor_get_state(machine_config.y_motor_id);
+        // Update homing state
+        stepper_motor_state_t x_state = STEPPER_MOTOR_get_state(machine_config.x_motor_id);
+        stepper_motor_state_t y_state = STEPPER_MOTOR_get_state(machine_config.y_motor_id);
 
         switch (homing_sequence_step)
         {
@@ -637,7 +683,7 @@ static bool execute_move(const position_t *start_pos, const position_t *end_pos,
         printf("Starting X-axis: %lu steps at %lu Hz, direction %d\n",
                steps_x, steps_per_sec_x, dir_x);
 
-        if (stepper_motor_move(machine_config.x_motor_id, steps_x, steps_per_sec_x, dir_x))
+        if (STEPPER_MOTOR_move(machine_config.x_motor_id, steps_x, steps_per_sec_x, dir_x))
         {
             x_started = true;
             printf("X-axis movement started successfully\n");
@@ -659,7 +705,7 @@ static bool execute_move(const position_t *start_pos, const position_t *end_pos,
         printf("Starting Y-axis: %lu steps at %lu Hz, direction %d\n",
                steps_y, steps_per_sec_y, dir_y);
 
-        if (stepper_motor_move(machine_config.y_motor_id, steps_y, steps_per_sec_y, dir_y))
+        if (STEPPER_MOTOR_move(machine_config.y_motor_id, steps_y, steps_per_sec_y, dir_y))
         {
             y_started = true;
             printf("Y-axis movement started successfully\n");
@@ -670,7 +716,7 @@ static bool execute_move(const position_t *start_pos, const position_t *end_pos,
             // Stop X if Y failed to start
             if (x_started)
             {
-                stepper_motor_stop(machine_config.x_motor_id);
+                STEPPER_MOTOR_stop(machine_config.x_motor_id);
                 printf("Stopped X-axis due to Y-axis failure\n");
             }
             success = false;

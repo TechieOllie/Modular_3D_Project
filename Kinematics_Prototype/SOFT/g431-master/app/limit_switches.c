@@ -239,11 +239,11 @@ void limit_switches_emergency_stop(void)
     printf("EMERGENCY STOP: Limit switch triggered!\n");
 
     // Stop all stepper motors immediately
-    for (uint8_t motor_id = 0; motor_id < STEPPER_MAX_MOTORS; motor_id++)
+    for (uint8_t motor_id = 0; motor_id < STEPPER_MOTOR_MAX_COUNT; motor_id++)
     {
-        if (stepper_motor_get_state(motor_id) == MOTOR_STATE_MOVING)
+        if (STEPPER_MOTOR_get_state(motor_id) == MOTOR_STATE_ERROR)
         {
-            stepper_motor_stop(motor_id);
+            STEPPER_MOTOR_stop(motor_id);
             printf("Stopped motor %d\n", motor_id);
         }
     }

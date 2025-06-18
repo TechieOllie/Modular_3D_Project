@@ -477,7 +477,7 @@ static bool execute_m_command(gcode_command_t *cmd)
         while (kinematics_get_state() != MOVE_STATE_IDLE)
         {
             kinematics_update();
-            stepper_motor_update();
+            STEPPER_MOTOR_update();
             HAL_Delay(10);
         }
         break;
@@ -618,16 +618,28 @@ bool parser_execute_gcode(const char *gcode)
         {
             uint32_t start_time = HAL_GetTick();
             uint32_t timeout = 30000; // 30 second timeout
+            uint32_t last_status = HAL_GetTick();
 
             while (kinematics_get_state() != MOVE_STATE_IDLE)
             {
                 kinematics_update();
-                stepper_motor_update();
+                STEPPER_MOTOR_update();
 
+                // Print status every 2 seconds
+                if (HAL_GetTick() - last_status > 2000)
+                {
+                    last_status = HAL_GetTick();
+                    position_t pos = kinematics_get_position();
+                    uart_commands_send_response_printf("| Moving... X=%.2f Y=%.2f |", pos.x, pos.y);
+                }
+
+                // Check for timeout
                 if (HAL_GetTick() - start_time > timeout)
                 {
-                    printf("Timeout waiting for move to complete\n");
+                    uart_commands_send_response("| Movement timeout - stopping motors |");
+                    STEPPER_MOTOR_emergency_stop_all();
                     kinematics_stop();
+                    send_error_response("Movement timeout");
                     result = false;
                     break;
                 }

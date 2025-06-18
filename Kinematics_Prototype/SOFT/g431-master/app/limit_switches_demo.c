@@ -115,14 +115,14 @@ void stepper_motor_with_limits_demo(void)
     // Motor 0 = X-axis, Motor 1 = Y-axis, Motor 2 = Z-axis
 
     // Associate motors with axes
-    stepper_motor_set_axis(0, AXIS_X); // Motor 0 -> X-axis
-    stepper_motor_set_axis(1, AXIS_Y); // Motor 1 -> Y-axis
-    stepper_motor_set_axis(2, AXIS_Z); // Motor 2 -> Z-axis
+    STEPPER_MOTOR_set_axis(0, AXIS_X); // Motor 0 -> X-axis
+    STEPPER_MOTOR_set_axis(1, AXIS_Y); // Motor 1 -> Y-axis
+    STEPPER_MOTOR_set_axis(2, AXIS_Z); // Motor 2 -> Z-axis
 
     // Enable limit checking for all motors
-    stepper_motor_enable_limit_check(0, true);
-    stepper_motor_enable_limit_check(1, true);
-    stepper_motor_enable_limit_check(2, true);
+    STEPPER_MOTOR_enable_limit_check(0, true);
+    STEPPER_MOTOR_enable_limit_check(1, true);
+    STEPPER_MOTOR_enable_limit_check(2, true);
 
     printf("Motors configured with limit switch checking\n");
 
@@ -131,12 +131,12 @@ void stepper_motor_with_limits_demo(void)
 
     // Home X-axis
     printf("Homing X-axis...\n");
-    stepper_motor_home_precision(0, 2000, 400); // Motor 0, 1000 steps/sec
+    STEPPER_MOTOR_home_precision(0, 2000, 400); // Motor 0, 2000 Hz fast, 400 Hz slow
 
     // Wait for homing to complete
-    while (stepper_motor_get_state(0) != MOTOR_STATE_IDLE)
+    while (STEPPER_MOTOR_get_state(0) != MOTOR_STATE_IDLE)
     {
-        stepper_motor_update();
+        STEPPER_MOTOR_update();
         HAL_Delay(10);
     }
     printf("X-axis homing complete\n");
@@ -145,11 +145,11 @@ void stepper_motor_with_limits_demo(void)
 
     // Home Y-axis
     printf("Homing Y-axis...\n");
-    stepper_motor_home_precision(1, 2000, 400); // Motor 1, 1000 steps/sec
+    STEPPER_MOTOR_home_precision(1, 2000, 400); // Motor 1, 2000 Hz fast, 400 Hz slow
 
-    while (stepper_motor_get_state(1) != MOTOR_STATE_IDLE)
+    while (STEPPER_MOTOR_get_state(1) != MOTOR_STATE_IDLE)
     {
-        stepper_motor_update();
+        STEPPER_MOTOR_update();
         HAL_Delay(10);
     }
     printf("Y-axis homing complete\n");
@@ -160,11 +160,11 @@ void stepper_motor_with_limits_demo(void)
     printf("\n=== Movement with Limit Checking ===\n");
 
     printf("Moving X-axis 500 steps (should be safe)...\n");
-    stepper_motor_move_with_limits(0, 500, 2000, MOTOR_DIR_CLOCKWISE);
+    STEPPER_MOTOR_move_with_limits(0, 500, 2000, MOTOR_DIR_CLOCKWISE);
 
-    while (stepper_motor_get_state(0) != MOTOR_STATE_IDLE)
+    while (STEPPER_MOTOR_get_state(0) != MOTOR_STATE_IDLE)
     {
-        stepper_motor_update();
+        STEPPER_MOTOR_update();
         HAL_Delay(10);
     }
     printf("X-axis movement complete\n");

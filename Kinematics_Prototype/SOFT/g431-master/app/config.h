@@ -72,6 +72,7 @@
 
 /*------------------Actionneurs------------------*/
 #define USE_MOTOR_DC 0
+#define USE_STEPPER_MOTOR 1 // Enable stepper motor module
 
 /*------------------Périphériques------------------*/
 #define USE_I2C 0
